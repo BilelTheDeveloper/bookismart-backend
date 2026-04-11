@@ -1,0 +1,40 @@
+# 🔒 SENSITIVE DATA (CRITICAL)
+.env
+.env.local
+.env.production
+config.js
+# If you use a json file for service accounts (like Firebase/AWS keys)
+*.json
+!package.json
+!package-lock.json
+
+# 📦 DEPENDENCIES
+node_modules/
+jspm_packages/
+
+# 🛠️ BUILD & DEBUG
+dist/
+build/
+.npm
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# 📂 OPERATING SYSTEM
+.DS_Store
+Thumbs.db
+.cache/
+.project
+.settings/
+.vscode/
+.idea/
+
+# 🧪 TESTING & COVERAGE
+coverage/
+.nyc_output
+
+# 🐳 DOCKER (If you use it for AWS)
+.dockerignore
+uploads/
