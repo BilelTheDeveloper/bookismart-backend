@@ -11,6 +11,10 @@ import authRoutes from './routes/auth.js';
 import loginRoutes from './routes/loginRoutes.js';
 import adminVerificationRoutes from './routes/admin/userVerification.js';
 
+// --- NEW: Added Domain Specific Routes ---
+import adminWebVerificationRoutes from './routes/admin/webVerificationRoutes.js';
+import merchantWebsiteRoutes from './routes/merchant/websiteRoutes.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -49,7 +53,7 @@ app.use(cors({
     }
   },
   credentials: true,
-  // ✅ ADDED 'PATCH' to the methods list below
+  // ✅ PATCH is included for status updates
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 })); 
@@ -58,9 +62,17 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true })); 
 
 // 6. Route Mounting
+
+// Auth & Identity
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', loginRoutes);
+
+// Admin Control Panel (KYC & Web Audit)
 app.use('/api/admin/user-verification', adminVerificationRoutes);
+app.use('/api/admin/web-verification', adminWebVerificationRoutes); // ✅ Added Web Audit Route
+
+// Merchant Control Panel (Website Builder)
+app.use('/api/merchant/website', merchantWebsiteRoutes); // ✅ Added Merchant Website Route
 
 app.get('/', (req, res) => {
   res.send('Bookismart API is running...');
