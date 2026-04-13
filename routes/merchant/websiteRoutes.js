@@ -1,12 +1,12 @@
 import express from 'express';
+// ✅ Import your pre-configured Cloudinary middleware
+import uploadCloudinary from '../../middleware/upload.js'; 
 import { 
   saveWebsiteData, 
   getMyWebsite 
 } from '../../controllers/merchant/websiteController.js';
 
-// Import your existing auth middleware
-// 'protect' ensures the user is logged in
-// 'isOwner' ensures the user has the 'owner' role from your User model
+// Auth middleware
 import { protect, isOwner } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -20,9 +20,19 @@ router.get('/my-site', protect, isOwner, getMyWebsite);
 
 /**
  * @route   POST /api/merchant/website/save
- * @desc    Create or update the website (Triggers 'pending' verification)
+ * @desc    Create or update the website with Cloudinary image support
  * @access  Private (Owner Only)
  */
-router.post('/save', protect, isOwner, saveWebsiteData);
+router.post('/save', 
+  protect, 
+  isOwner, 
+  // ✅ Use uploadCloudinary.fields to intercept images and upload them to specific folders
+  uploadCloudinary.fields([
+    { name: 'heroImage', maxCount: 1 },
+    { name: 'aboutImage', maxCount: 1 },
+    { name: 'galleryImages', maxCount: 10 }
+  ]),
+  saveWebsiteData
+);
 
 export default router;

@@ -19,27 +19,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
+
+// Connect to MongoDB
 connectDB();
 
 const app = express();
 
-// 4. Security Middleware
+// 1. Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: false, 
 })); 
 
 /**
  * 🛡️ DYNAMIC CORS WHITELIST
+ * This allows your local dev environment and your deployed Vercel/Render URLs
  */
 const allowedOrigins = [
   "http://localhost:5173",          // Local Development
-  "https://bookiify.vercel.app",    // Production Frontend
-  "https://bookify.tn",             // Future Domain
-  process.env.CLIENT_URL            // URL from Render Dashboard
+  "https://bookiify.vercel.app",    // Production Frontend (Vercel)
+  "https://bookify.tn",             // Production Domain
+  process.env.CLIENT_URL            // Optional: URL set in Render environment
 ].filter(Boolean);
 
 app.use(cors({ 
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.includes(origin)) {
@@ -54,41 +58,45 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 })); 
 
+// 2. Body Parsers
 app.use(express.json()); 
 app.use(express.urlencoded({ extended: true })); 
 
-// 6. Route Mounting
+// 3. Route Mounting
 
 // Auth & Identity
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', loginRoutes);
 
-// Admin Control Panel (KYC & Web Audit)
+// Admin Control Panel (User Identity / KYC)
 app.use('/api/admin/user-verification', adminVerificationRoutes);
 
 /**
- * ✅ FIX: Added mount point for /api/admin/websites
- * This resolves the 404 error because your frontend calls /api/admin/websites/pending
+ * ✅ ADMIN WEBSITE AUDIT FIX
+ * Mounting this at /api/admin/websites ensures that the call 
+ * to /api/admin/websites/pending (from your frontend) works perfectly.
  */
-app.use('/api/admin/web-verification', adminWebVerificationRoutes); 
 app.use('/api/admin/websites', adminWebVerificationRoutes); 
 
-// Merchant Control Panel (Website Builder)
+// Merchant Control Panel (Website Builder & Settings)
 app.use('/api/merchant/website', merchantWebsiteRoutes); 
 
+// Root Route
 app.get('/', (req, res) => {
   res.send('Bookismart API is running...');
 });
 
-// 8. Error Handling
+// 4. Global Error Handling
 app.use((err, req, res, next) => {
+  console.error("❌ [Global Error]:", err.stack);
   res.status(err.status || 500).json({ 
-    error: err.message || "Something went wrong." 
+    error: err.message || "Something went wrong on the server." 
   });
 });
 
+// 5. Server Initialization
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📡 Whitelisted: ${allowedOrigins.join(', ')}`);
+  console.log(`📡 Whitelisted Origins: ${allowedOrigins.join(', ')}`);
 });

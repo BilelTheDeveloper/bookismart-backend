@@ -2,7 +2,7 @@ import Website from '../../models/Website.js';
 
 /**
  * @desc    Get all websites pending admin audit
- * @route   GET /api/admin/web-verification/pending
+ * @route   GET /api/admin/websites/pending  <-- Updated comment to match actual URL
  * @access  Private (Admin Only)
  */
 export const getPendingWebsites = async (req, res) => {
@@ -10,9 +10,9 @@ export const getPendingWebsites = async (req, res) => {
     console.log("🔍 [Admin]: Fetching pending Website deployment requests...");
 
     // Find websites where verificationStatus is 'pending'
-    // We populate owner info so the admin knows who created it
+    // Populate owner info so the admin knows who created it
     const pendingSites = await Website.find({ verificationStatus: 'pending' })
-      .populate('ownerId', 'fullName email businessName phone')
+      .populate('ownerId', 'fullName email businessName phone profilePicUrl') // Added profilePicUrl just in case
       .sort({ lastUpdated: -1 });
 
     res.status(200).json(pendingSites);
@@ -24,13 +24,13 @@ export const getPendingWebsites = async (req, res) => {
 
 /**
  * @desc    Update Website verification status (Approve or Reject)
- * @route   PATCH /api/admin/web-verification/status/:id
+ * @route   PATCH /api/admin/websites/status/:id <-- Updated comment to match actual URL
  * @access  Private (Admin Only)
  */
 export const updateWebsiteStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, rejectionReason } = req.body; // status: 'approved' or 'rejected'
+    const { status, rejectionReason } = req.body; 
 
     console.log(`⚖️ [Admin Action]: Web Audit - ${status} for Site ID: ${id}`);
 
@@ -43,8 +43,8 @@ export const updateWebsiteStatus = async (req, res) => {
     const updateData = {
       verificationStatus: status,
       rejectionReason: status === 'rejected' ? rejectionReason : "",
-      // If approved, the site goes live
-      isPublished: status === 'approved' ? true : false,
+      // Important: isPublished is only true if status is exactly 'approved'
+      isPublished: status === 'approved',
       lastUpdated: Date.now()
     };
 
@@ -52,8 +52,8 @@ export const updateWebsiteStatus = async (req, res) => {
     const updatedWebsite = await Website.findByIdAndUpdate(
       id,
       { $set: updateData },
-      { new: true }
-    ).populate('ownerId', 'email businessName');
+      { new: true, runValidators: true }
+    ).populate('ownerId', 'email businessName fullName');
 
     if (!updatedWebsite) {
       return res.status(404).json({ error: "Website deployment record not found." });

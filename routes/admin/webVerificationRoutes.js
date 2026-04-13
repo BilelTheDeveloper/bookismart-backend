@@ -4,20 +4,25 @@ import {
   updateWebsiteStatus 
 } from '../../controllers/admin/webVerificationController.js';
 
+// Import your existing auth middleware
 import { protect, admin } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 /**
- * UPDATED ROUTE: Matches what frontend is calling
  * @route   GET /api/admin/websites/pending
+ * @desc    Fetch all websites waiting for deployment approval
+ * @access  Private (Admin Only)
+ * * NOTE: Since this is mounted at '/api/admin/websites' in server.js,
+ * we only use '/pending' here.
  */
-router.get('/websites/pending', protect, admin, getPendingWebsites);
+router.get('/pending', protect, admin, getPendingWebsites);
 
 /**
- * UPDATED ROUTE: Matches the common pattern for status updates
  * @route   PATCH /api/admin/websites/status/:id
+ * @desc    Approve or Reject a website deployment
+ * @access  Private (Admin Only)
  */
-router.patch('/websites/status/:id', protect, admin, updateWebsiteStatus);
+router.patch('/status/:id', protect, admin, updateWebsiteStatus);
 
 export default router;
