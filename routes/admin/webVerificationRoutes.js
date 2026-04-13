@@ -1,7 +1,8 @@
 import express from 'express';
 import { 
   getPendingWebsites, 
-  updateWebsiteStatus 
+  updateWebsiteStatus,
+  getApprovedWebsites // ✅ Added this import
 } from '../../controllers/admin/webVerificationController.js';
 
 // Import your existing auth middleware
@@ -17,6 +18,13 @@ const router = express.Router();
  * we only use '/pending' here.
  */
 router.get('/pending', protect, admin, getPendingWebsites);
+
+/**
+ * @route   GET /api/admin/websites/approved
+ * @desc    Fetch all websites that are live (for the Professionals page)
+ * @access  Private (Admin Only)
+ */
+router.get('/approved', protect, admin, getApprovedWebsites);
 
 /**
  * @route   PATCH /api/admin/websites/status/:id

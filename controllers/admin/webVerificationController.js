@@ -2,17 +2,15 @@ import Website from '../../models/Website.js';
 
 /**
  * @desc    Get all websites pending admin audit
- * @route   GET /api/admin/websites/pending  <-- Updated comment to match actual URL
+ * @route   GET /api/admin/websites/pending
  * @access  Private (Admin Only)
  */
 export const getPendingWebsites = async (req, res) => {
   try {
     console.log("🔍 [Admin]: Fetching pending Website deployment requests...");
 
-    // Find websites where verificationStatus is 'pending'
-    // Populate owner info so the admin knows who created it
     const pendingSites = await Website.find({ verificationStatus: 'pending' })
-      .populate('ownerId', 'fullName email businessName phone profilePicUrl') // Added profilePicUrl just in case
+      .populate('ownerId', 'fullName email businessName phone profilePicUrl')
       .sort({ lastUpdated: -1 });
 
     res.status(200).json(pendingSites);
@@ -23,8 +21,29 @@ export const getPendingWebsites = async (req, res) => {
 };
 
 /**
+ * @desc    Get all approved websites (For Professionals/Marketplace Page)
+ * @route   GET /api/admin/websites/approved
+ * @access  Private (Admin Only)
+ */
+export const getApprovedWebsites = async (req, res) => {
+  try {
+    console.log("🌟 [Admin]: Fetching approved websites for marketplace...");
+
+    // Find websites where verificationStatus is 'approved'
+    const approvedSites = await Website.find({ verificationStatus: 'approved' })
+      .populate('ownerId', 'fullName email businessName phone city profilePicUrl') 
+      .sort({ lastUpdated: -1 });
+
+    res.status(200).json(approvedSites);
+  } catch (error) {
+    console.error("🔥 [Admin Error]: Failed to fetch approved websites:", error.message);
+    res.status(500).json({ error: "Internal server error fetching approved websites." });
+  }
+};
+
+/**
  * @desc    Update Website verification status (Approve or Reject)
- * @route   PATCH /api/admin/websites/status/:id <-- Updated comment to match actual URL
+ * @route   PATCH /api/admin/websites/status/:id
  * @access  Private (Admin Only)
  */
 export const updateWebsiteStatus = async (req, res) => {
