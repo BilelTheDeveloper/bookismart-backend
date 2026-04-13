@@ -11,7 +11,7 @@ import authRoutes from './routes/auth.js';
 import loginRoutes from './routes/loginRoutes.js';
 import adminVerificationRoutes from './routes/admin/userVerification.js';
 
-// --- NEW: Added Domain Specific Routes ---
+// --- Domain Specific Routes ---
 import adminWebVerificationRoutes from './routes/admin/webVerificationRoutes.js';
 import merchantWebsiteRoutes from './routes/merchant/websiteRoutes.js';
 
@@ -30,19 +30,16 @@ app.use(helmet({
 
 /**
  * 🛡️ DYNAMIC CORS WHITELIST
- * This solves the "Blocked by CORS policy" error by allowing 
- * multiple trusted origins simultaneously.
  */
 const allowedOrigins = [
   "http://localhost:5173",          // Local Development
   "https://bookiify.vercel.app",    // Production Frontend
   "https://bookify.tn",             // Future Domain
   process.env.CLIENT_URL            // URL from Render Dashboard
-].filter(Boolean); // Clean up any empty values
+].filter(Boolean);
 
 app.use(cors({ 
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or server-to-server)
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.includes(origin)) {
@@ -53,7 +50,6 @@ app.use(cors({
     }
   },
   credentials: true,
-  // ✅ PATCH is included for status updates
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 })); 
@@ -69,10 +65,16 @@ app.use('/api/auth', loginRoutes);
 
 // Admin Control Panel (KYC & Web Audit)
 app.use('/api/admin/user-verification', adminVerificationRoutes);
-app.use('/api/admin/web-verification', adminWebVerificationRoutes); // ✅ Added Web Audit Route
+
+/**
+ * ✅ FIX: Added mount point for /api/admin/websites
+ * This resolves the 404 error because your frontend calls /api/admin/websites/pending
+ */
+app.use('/api/admin/web-verification', adminWebVerificationRoutes); 
+app.use('/api/admin/websites', adminWebVerificationRoutes); 
 
 // Merchant Control Panel (Website Builder)
-app.use('/api/merchant/website', merchantWebsiteRoutes); // ✅ Added Merchant Website Route
+app.use('/api/merchant/website', merchantWebsiteRoutes); 
 
 app.get('/', (req, res) => {
   res.send('Bookismart API is running...');
