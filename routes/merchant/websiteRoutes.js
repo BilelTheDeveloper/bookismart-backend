@@ -1,26 +1,38 @@
 import express from 'express';
+// ✅ Import your pre-configured Cloudinary middleware
+import uploadCloudinary from '../../utils/uploadCloudinary.js'; 
 import { 
-  getPendingWebsites, 
-  updateWebsiteStatus,
-  getApprovedWebsites 
-} from '../../controllers/admin/webVerificationController.js';
+  saveWebsiteData, 
+  getMyWebsite 
+} from '../../controllers/merchant/websiteController.js';
 
-import { protect, admin } from '../../middleware/authMiddleware.js';
+// Auth middleware
+import { protect, isOwner } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// --- 🔒 ADMIN ONLY ROUTES ---
-
-router.get('/pending', protect, admin, getPendingWebsites);
-router.patch('/status/:id', protect, admin, updateWebsiteStatus);
-
-// --- 🌍 PUBLIC ROUTE ---
+/**
+ * @route   GET /api/merchant/website/my-site
+ * @desc    Retrieve the current merchant's website configuration
+ * @access  Private (Owner Only)
+ */
+router.get('/my-site', protect, isOwner, getMyWebsite);
 
 /**
- * @route   GET /api/admin/websites/approved
- * @desc    Fetch live websites for the public marketplace
- * @access  Public (Removed protect and admin)
+ * @route   POST /api/merchant/website/save
+ * @desc    Create or update the website with Cloudinary image support
+ * @access  Private (Owner Only)
  */
-router.get('/approved', getApprovedWebsites); // ✅ Fixed: Removed middleware
+router.post('/save', 
+  protect, 
+  isOwner, 
+  // ✅ Use uploadCloudinary.fields to intercept images and upload them to specific folders
+  uploadCloudinary.fields([
+    { name: 'heroImage', maxCount: 1 },
+    { name: 'aboutImage', maxCount: 1 },
+    { name: 'galleryImages', maxCount: 10 }
+  ]),
+  saveWebsiteData
+);
 
 export default router;
