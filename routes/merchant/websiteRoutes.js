@@ -1,6 +1,6 @@
 import express from 'express';
 // ✅ Import your pre-configured Cloudinary middleware
-import uploadCloudinary from '../../middleware/upload.js'; 
+import uploadCloudinary from '../../utils/uploadCloudinary.js'; 
 import { 
   saveWebsiteData, 
   getMyWebsite 
