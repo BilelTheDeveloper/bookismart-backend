@@ -10,41 +10,42 @@ export const saveWebsiteData = async (req, res) => {
     const ownerId = req.user.id; 
 
     // 1. Handle incoming data structure
-    // If you send FormData, sometimes JSON fields are strings. We parse them if needed.
+    // If sending FormData, the JSON payload usually comes in a 'data' field
     let websiteData = req.body;
-    if (typeof req.body.data === 'string') {
+    if (req.body.data && typeof req.body.data === 'string') {
       websiteData = JSON.parse(req.body.data);
     }
 
     console.log(`💾 [Merchant]: Processing website update for Owner: ${ownerId}`);
 
     // 2. Intercept Cloudinary Uploads
-    // If files exist in the request, we overwrite the specific fields with Cloudinary URLs
+    // req.files is populated by the uploadCloudinary middleware
     if (req.files) {
-      // Hero Background Image
+      // Hero Background Image Update
       if (req.files['heroImage'] && req.files['heroImage'][0]) {
+        // Ensure hero object exists before adding image
         websiteData.hero = {
-          ...websiteData.hero,
+          ...(websiteData.hero || {}),
           backgroundImage: req.files['heroImage'][0].path
         };
       }
 
-      // About Section Image
+      // About Section Image Update
       if (req.files['aboutImage'] && req.files['aboutImage'][0]) {
+        // Ensure about object exists before adding image
         websiteData.about = {
-          ...websiteData.about,
+          ...(websiteData.about || {}),
           image: req.files['aboutImage'][0].path
         };
       }
 
       // Gallery Images (Array)
-      if (req.files['galleryImages']) {
+      if (req.files['galleryImages'] && req.files['galleryImages'].length > 0) {
         const uploadedGalleryUrls = req.files['galleryImages'].map(file => file.path);
         
-        // If you want to replace old gallery images, use map. 
-        // If you want to append, you'd spread the existing ones.
+        // We replace the images array with the new Cloudinary URLs
         websiteData.gallery = {
-          ...websiteData.gallery,
+          ...(websiteData.gallery || {}),
           images: uploadedGalleryUrls,
           show: true
         };
@@ -52,21 +53,21 @@ export const saveWebsiteData = async (req, res) => {
     }
 
     // 3. Database Operation
-    // We maintain all existing fields but overwrite with new data and reset verification status
+    // Use findOneAndUpdate with upsert to create if it doesn't exist
     const website = await Website.findOneAndUpdate(
       { ownerId: ownerId },
       { 
         ...websiteData, 
         ownerId,
-        verificationStatus: 'pending', 
-        isPublished: false, // Ensure it's not live until admin re-approves
+        verificationStatus: 'pending', // Reset status for Admin re-audit
+        isPublished: false,           // Take offline until approved
         lastUpdated: Date.now() 
       },
       { new: true, upsert: true, runValidators: true }
     );
 
     res.status(200).json({
-      message: "Website configuration saved and images uploaded successfully.",
+      message: "Website configuration and images saved successfully to Cloudinary.",
       website
     });
 

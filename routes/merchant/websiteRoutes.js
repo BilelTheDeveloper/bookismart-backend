@@ -22,11 +22,14 @@ router.get('/my-site', protect, isOwner, getMyWebsite);
  * @route   POST /api/merchant/website/save
  * @desc    Create or update the website with Cloudinary image support
  * @access  Private (Owner Only)
+ * * ✅ middleware logic:
+ * - heroImage: Saved to Bookismart/Websites/Hero
+ * - aboutImage: Saved to Bookismart/Websites/About
+ * - galleryImages: Saved to Bookismart/Websites/Gallery
  */
 router.post('/save', 
   protect, 
   isOwner, 
-  // ✅ Use uploadCloudinary.fields to intercept images and upload them to specific folders
   uploadCloudinary.fields([
     { name: 'heroImage', maxCount: 1 },
     { name: 'aboutImage', maxCount: 1 },
