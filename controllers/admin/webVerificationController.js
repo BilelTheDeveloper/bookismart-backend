@@ -90,3 +90,36 @@ export const updateWebsiteStatus = async (req, res) => {
     res.status(500).json({ error: "Internal server error during website audit." });
   }
 };
+
+/**
+ * ✅ NEW: Get website by slug (For the Public "Bio Link" Profile)
+ * @desc    Fetch a single website's data using its slug
+ * @route   GET /api/public/website/:slug
+ * @access  Public
+ */
+export const getWebsiteBySlug = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    
+    console.log(`🌍 [Public]: Fetching profile for slug: ${slug}`);
+
+    // Find the website by slug. 
+    // We populate ownerId to get the business name and professional info.
+    const website = await Website.findOne({ slug })
+      .populate('ownerId', 'fullName businessName profilePicUrl city phone');
+
+    if (!website) {
+      return res.status(404).json({ error: "Website profile not found." });
+    }
+
+    // Optional: Only allow viewing if it is approved/published
+    // if (!website.isPublished) {
+    //   return res.status(403).json({ error: "This website is currently under review." });
+    // }
+
+    res.status(200).json(website);
+  } catch (error) {
+    console.error("🔥 [Public Error]: Failed to fetch website by slug:", error.message);
+    res.status(500).json({ error: "Internal server error fetching profile." });
+  }
+};

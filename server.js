@@ -14,6 +14,8 @@ import adminVerificationRoutes from './routes/admin/userVerification.js';
 // --- Domain Specific Routes ---
 import adminWebVerificationRoutes from './routes/admin/webVerificationRoutes.js';
 import merchantWebsiteRoutes from './routes/merchant/websiteRoutes.js';
+// ✅ New: Import the Public Routes for the "Bio Link" profiles
+import publicRoutes from './routes/publicRoutes.js'; 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,10 +34,9 @@ app.use(helmet({
 
 /**
  * 🛡️ DYNAMIC CORS WHITELIST
- * This allows your local dev environment and your deployed Vercel/Render URLs
  */
 const allowedOrigins = [
-  "http://localhost:5173",          // Local Development
+  "http://localhost:5173",           // Local Development
   "https://bookiify.vercel.app",    // Production Frontend (Vercel)
   "https://bookify.tn",             // Production Domain
   process.env.CLIENT_URL            // Optional: URL set in Render environment
@@ -43,7 +44,6 @@ const allowedOrigins = [
 
 app.use(cors({ 
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.includes(origin)) {
@@ -68,13 +68,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', loginRoutes);
 
+/**
+ * ✅ PUBLIC ROUTES (Bio-Link / Public Profiles)
+ * This must stay above restricted routes to ensure easy access.
+ */
+app.use('/api/public', publicRoutes);
+
 // Admin Control Panel (User Identity / KYC)
 app.use('/api/admin/user-verification', adminVerificationRoutes);
 
 /**
- * ✅ ADMIN WEBSITE AUDIT FIX
- * Mounting this at /api/admin/websites ensures that the call 
- * to /api/admin/websites/pending (from your frontend) works perfectly.
+ * ✅ ADMIN WEBSITE AUDIT
  */
 app.use('/api/admin/websites', adminWebVerificationRoutes); 
 
