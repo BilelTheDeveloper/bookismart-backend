@@ -14,7 +14,6 @@ import adminVerificationRoutes from './routes/admin/userVerification.js';
 // --- Domain Specific Routes ---
 import adminWebVerificationRoutes from './routes/admin/webVerificationRoutes.js';
 import merchantWebsiteRoutes from './routes/merchant/websiteRoutes.js';
-// ✅ New: Import the Public Routes for the "Bio Link" profiles
 import publicRoutes from './routes/publicRoutes.js'; 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,7 +26,14 @@ connectDB();
 
 const app = express();
 
-// 1. Security Middleware
+/**
+ * ⚡ SUPER POWER UPGRADES
+ */
+
+// A. Trust Proxy (Essential for Render/Vercel deployments)
+app.set('trust proxy', 1);
+
+// B. Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: false, 
 })); 
@@ -42,7 +48,7 @@ const allowedOrigins = [
   process.env.CLIENT_URL            // Optional: URL set in Render environment
 ].filter(Boolean);
 
-app.use(cors({ 
+const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
     
@@ -55,8 +61,14 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-})); 
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  optionsSuccessStatus: 200 
+};
+
+// C. Apply CORS and Global Preflight Handler
+// Using Regex Literal to bypass Path-to-Regexp strictness in Node v25
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions)); 
 
 // 2. Body Parsers
 app.use(express.json()); 
@@ -69,12 +81,11 @@ app.use('/api/auth', authRoutes);
 app.use('/api/auth', loginRoutes);
 
 /**
- * ✅ PUBLIC ROUTES (Bio-Link / Public Profiles)
- * This must stay above restricted routes to ensure easy access.
+ * ✅ PUBLIC ROUTES
  */
 app.use('/api/public', publicRoutes);
 
-// Admin Control Panel (User Identity / KYC)
+// Admin Control Panel
 app.use('/api/admin/user-verification', adminVerificationRoutes);
 
 /**
@@ -82,16 +93,20 @@ app.use('/api/admin/user-verification', adminVerificationRoutes);
  */
 app.use('/api/admin/websites', adminWebVerificationRoutes); 
 
-// Merchant Control Panel (Website Builder & Settings)
+// Merchant Control Panel
 app.use('/api/merchant/website', merchantWebsiteRoutes); 
 
 // Root Route
 app.get('/', (req, res) => {
-  res.send('Bookismart API is running...');
+  res.send('Bookismart API is running with Super Powers... 🚀');
 });
 
 // 4. Global Error Handling
 app.use((err, req, res, next) => {
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ error: "CORS Policy Restriction" });
+  }
+
   console.error("❌ [Global Error]:", err.stack);
   res.status(err.status || 500).json({ 
     error: err.message || "Something went wrong on the server." 
