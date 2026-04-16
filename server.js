@@ -13,6 +13,7 @@ import adminVerificationRoutes from './routes/admin/userVerification.js';
 
 // --- Domain Specific Routes ---
 import adminWebVerificationRoutes from './routes/admin/webVerificationRoutes.js';
+import adminAccessRoutes from './routes/admin/adminRoutes.js'; // ✅ NEW: Admin Access Routes
 import merchantWebsiteRoutes from './routes/merchant/websiteRoutes.js';
 import publicRoutes from './routes/publicRoutes.js'; 
 
@@ -45,7 +46,7 @@ const allowedOrigins = [
   "http://localhost:5173",           // Local Development
   "https://bookiify.vercel.app",    // Production Frontend (Vercel)
   "https://bookify.tn",             // Production Domain
-  process.env.CLIENT_URL            // Optional: URL set in Render environment
+  process.env.CLIENT_URL             // Optional: URL set in Render environment
 ].filter(Boolean);
 
 const corsOptions = {
@@ -66,7 +67,6 @@ const corsOptions = {
 };
 
 // C. Apply CORS and Global Preflight Handler
-// Using Regex Literal to bypass Path-to-Regexp strictness in Node v25
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions)); 
 
@@ -89,9 +89,10 @@ app.use('/api/public', publicRoutes);
 app.use('/api/admin/user-verification', adminVerificationRoutes);
 
 /**
- * ✅ ADMIN WEBSITE AUDIT
+ * ✅ ADMIN WEBSITE AUDIT & ACCESS CONTROL
  */
 app.use('/api/admin/websites', adminWebVerificationRoutes); 
+app.use('/api/admin/access', adminAccessRoutes); // ✅ NEW: Mounted Admin Access logic
 
 // Merchant Control Panel
 app.use('/api/merchant/website', merchantWebsiteRoutes); 

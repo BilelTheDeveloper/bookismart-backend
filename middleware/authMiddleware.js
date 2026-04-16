@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import Admin from '../models/Access.js'; // ✅ Imported the new Admin model
 
 /**
  * 🔐 Protect: Ensures the user is logged in with a valid JWT
@@ -54,4 +55,50 @@ export const isOwner = (req, res, next) => {
   } else {
     res.status(403).json({ error: "Access denied. Owners only." });
   }
+};
+
+/**
+ * 🛡️ NEW: protectAdmin
+ * Specific for the System Admin Access model
+ */
+export const protectAdmin = async (req, res, next) => {
+  let token;
+
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    try {
+      token = req.headers.authorization.split(' ')[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+      // Use the Admin model for system-level access
+      req.user = await Admin.findById(decoded.id).select('-passwordHash');
+
+      if (!req.user || !req.user.isActive) {
+        return res.status(401).json({ error: "Not authorized, admin account inactive." });
+      }
+
+      next();
+    } catch (error) {
+      console.error("🔒 [Admin Auth Error]:", error.message);
+      res.status(401).json({ error: "Not authorized, admin token failed." });
+    }
+  }
+
+  if (!token) {
+    res.status(401).json({ error: "Not authorized, no admin token provided." });
+  }
+};
+
+/**
+ * 🔑 NEW: authorize
+ * Handles flexible role checks for the Admin model (admin, support, moderator)
+ */
+export const authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.accessLevel)) {
+      return res.status(403).json({ 
+        error: `Forbidden: Access level '${req.user?.accessLevel}' unauthorized.` 
+      });
+    }
+    next();
+  };
 };
