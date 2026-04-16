@@ -23,7 +23,7 @@ router.post('/auth/login', loginAdmin);
 /**
  * --- PROTECTED ROUTES ---
  * All routes below this line require a valid token and 'admin' level permissions.
- * These routes are usually mounted at /api/admin/access in your server.js
+ * These routes are mounted at /api/admin/access in your server.js
  */
 
 // ✅ Get the full list of system users for the Access Control UI
@@ -31,7 +31,7 @@ router.post('/auth/login', loginAdmin);
 router.get(
   '/list', 
   protectAdmin, 
-  authorize('admin'), 
+  authorize('admin'), // Ensures only the 'admin' accessLevel can see the list
   getAllAdmins
 );
 

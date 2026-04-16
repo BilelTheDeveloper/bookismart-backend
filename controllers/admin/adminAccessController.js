@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 
 /**
  * @desc    Create a new admin/moderator (Grant Access)
- * @route   POST /api/v1/admin/access/grant
+ * @route   POST /api/admin/access/grant
  * @access  Private (Only 'admin' can grant access)
  */
 export const grantAccess = async (req, res) => {
@@ -16,11 +16,12 @@ export const grantAccess = async (req, res) => {
       return res.status(400).json({ message: "This email already has system access." });
     }
 
-    // 2. Create the new admin (password hashing is handled in the model middleware)
+    // 2. Create the new admin
+    // Note: passwordHash: password assumes your Access model has a pre-save hook to hash it
     const newAdmin = await Admin.create({
       fullName,
       email,
-      passwordHash: password, // The pre-save hook in your model will hash this
+      passwordHash: password, 
       accessLevel,
       secretKey,
       isActive: true
@@ -43,7 +44,7 @@ export const grantAccess = async (req, res) => {
 
 /**
  * @desc    Admin Login Logic
- * @route   POST /api/v1/admin/access/login
+ * @route   POST /api/admin/access/auth/login
  * @access  Public
  */
 export const loginAdmin = async (req, res) => {
@@ -56,24 +57,27 @@ export const loginAdmin = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials or account disabled." });
     }
 
-    // 2. Compare password (using the helper method we added to the model)
+    // 2. Compare password
     const isMatch = await admin.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
-    // 3. Update last login timestamp
-    admin.lastLogin = Date.now();
-    await admin.save();
+    // 3. Update last login timestamp 
+    // 🔥 FIX: Use findOneAndUpdate to avoid re-triggering the password hashing middleware on save()
+    await Admin.findOneAndUpdate(
+      { _id: admin._id },
+      { lastLogin: Date.now() }
+    );
 
     // 4. Generate JWT Token
+    // Payload 'id' matches Admin.findById(decoded.id) in your middleware
     const token = jwt.sign(
       { id: admin._id, accessLevel: admin.accessLevel },
-      process.env.JWT_SECRET || 'your_fallback_secret',
+      process.env.JWT_SECRET,
       { expiresIn: '12h' }
     );
 
-    // ✅ Added 'role: admin' to the response to prevent frontend auth conflicts
     res.status(200).json({
       success: true,
       token,
@@ -92,41 +96,43 @@ export const loginAdmin = async (req, res) => {
 
 /**
  * @desc    Get all admins (For the Access Control UI)
- * @route   GET /api/v1/admin/access/list
+ * @route   GET /api/admin/access/list
  * @access  Private (Admin only)
  */
 export const getAllAdmins = async (req, res) => {
   try {
+    // Select all except sensitive credentials
     const admins = await Admin.find().select('-passwordHash -secretKey');
     res.status(200).json({ success: true, admins });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching admin list" });
+    res.status(500).json({ message: "Error fetching admin list", error: error.message });
   }
 };
 
 /**
  * @desc    Kill Access (Deactivate Admin)
- * @route   PATCH /api/v1/admin/access/toggle/:id
+ * @route   PATCH /api/admin/access/toggle/:id
  * @access  Private (Admin only)
  */
 export const toggleAdminStatus = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.params.id);
-    if (!admin) return res.status(404).json({ message: "Admin not found" });
+    const adminToToggle = await Admin.findById(req.params.id);
+    if (!adminToToggle) return res.status(404).json({ message: "Admin not found" });
 
     // Prevent deactivating yourself (Safety Lock)
-    if (admin.email === req.user.email) {
+    // req.user comes from protectAdmin middleware
+    if (adminToToggle.email === req.user.email) {
       return res.status(400).json({ message: "You cannot deactivate your own account." });
     }
 
-    admin.isActive = !admin.isActive;
-    await admin.save();
+    adminToToggle.isActive = !adminToToggle.isActive;
+    await adminToToggle.save();
 
     res.status(200).json({ 
       success: true, 
-      message: `Admin is now ${admin.isActive ? 'Active' : 'Deactivated'}` 
+      message: `Admin is now ${adminToToggle.isActive ? 'Active' : 'Deactivated'}` 
     });
   } catch (error) {
-    res.status(500).json({ message: "Toggle failed" });
+    res.status(500).json({ message: "Toggle failed", error: error.message });
   }
 };

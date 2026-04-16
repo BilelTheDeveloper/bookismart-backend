@@ -1,22 +1,19 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import Admin from '../models/Access.js'; // ✅ Imported the new Admin model
+import Admin from '../models/Access.js'; 
 
 /**
- * 🔐 Protect: Ensures the user is logged in with a valid JWT (Regular Users/Owners)
+ * 🔐 Protect: Ensures the user is logged in (Regular Users/Owners)
+ * Checks the 'User' collection.
  */
 export const protect = async (req, res, next) => {
   let token;
 
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     try {
-      // Get token from header
       token = req.headers.authorization.split(' ')[1];
-
-      // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      // Get user from the token (excluding password)
       req.user = await User.findById(decoded.id).select('-password');
 
       if (!req.user) {
@@ -36,7 +33,7 @@ export const protect = async (req, res, next) => {
 };
 
 /**
- * 👑 Admin Only: Ensures the user has an admin role (Regular User Model)
+ * 👑 Admin: Checks 'role' field in the regular User model
  */
 export const admin = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
@@ -47,7 +44,7 @@ export const admin = (req, res, next) => {
 };
 
 /**
- * 🏢 Owner Only: Ensures the user is a Merchant/Owner
+ * 🏢 Owner: Checks 'role' field in the regular User model
  */
 export const isOwner = (req, res, next) => {
   if (req.user && (req.user.role === 'owner' || req.user.role === 'admin')) {
@@ -58,8 +55,9 @@ export const isOwner = (req, res, next) => {
 };
 
 /**
- * 🛡️ NEW: protectAdmin
- * Specific for the System Admin Access model (Access.js collection)
+ * 🛡️ protectAdmin
+ * Checks the 'Admin' (Access) collection specifically.
+ * Use this for System Administration tasks.
  */
 export const protectAdmin = async (req, res, next) => {
   let token;
@@ -88,18 +86,17 @@ export const protectAdmin = async (req, res, next) => {
       res.status(401).json({ error: "Not authorized, admin token failed." });
     }
   } else {
-    // Ensuring we return here so the code doesn't proceed to "next()"
     return res.status(401).json({ error: "Not authorized, no admin token provided." });
   }
 };
 
 /**
- * 🔑 NEW: authorize
- * Handles flexible role checks for the Admin model (admin, support, moderator)
+ * 🔑 authorize
+ * Checks 'accessLevel' in the Admin (Access) model.
  */
 export const authorize = (...roles) => {
   return (req, res, next) => {
-    // Checks the 'accessLevel' field specifically found in the Admin model
+    // Note: We use req.user.accessLevel here because that's the field in Access.js
     if (!req.user || !roles.includes(req.user.accessLevel)) {
       return res.status(403).json({ 
         error: `Forbidden: Access level '${req.user?.accessLevel}' unauthorized.` 
@@ -109,4 +106,5 @@ export const authorize = (...roles) => {
   };
 };
 
+// Default export including all methods for flexibility
 export default { protect, admin, isOwner, protectAdmin, authorize };
