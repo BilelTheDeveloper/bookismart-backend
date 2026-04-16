@@ -35,7 +35,7 @@ const seedAdmin = async () => {
 
     // Hash the long password
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash("13Bilelukga!:é&'diudgaudgaiudjamila(\"ygvildyailzdyvgazild", salt);
+    const hashedPassword = await bcrypt.hash("13Bilelukgadiudgaudgaiudjamilaygvildyailzdyvgazild", salt);
 
     const superAdmin = new Admin({
       fullName: "Bilel Helal",
@@ -43,7 +43,7 @@ const seedAdmin = async () => {
       password: hashedPassword,
       accessLevel: "admin",
       isActive: true,
-      secretKey: "13Bilelukga!:é&'diudgaudgaiudjamila(\"ygvildyailzdyvgazild"
+      secretKey: "13Bilelukgadiudgaudgaiudjamilaygvildyailzdyvgazild"
     });
 
     await superAdmin.save();
