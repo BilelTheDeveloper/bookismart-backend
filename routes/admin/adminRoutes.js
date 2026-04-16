@@ -10,8 +10,8 @@ import {
 } from '../../controllers/admin/adminAccessController.js';
 
 // Import your middleware
-// protectAdmin: Verifies the JWT token
-// authorize: Checks if req.user.accessLevel === 'admin'
+// protectAdmin: Verifies the JWT token and finds the admin in the database
+// authorize: Checks if req.user.accessLevel matches the required role
 import { protectAdmin, authorize } from '../../middleware/authMiddleware.js';
 
 /**
@@ -23,11 +23,11 @@ router.post('/auth/login', loginAdmin);
 /**
  * --- PROTECTED ROUTES ---
  * All routes below this line require a valid token and 'admin' level permissions.
- * These are mounted at /api/admin/access in server.js
+ * These routes are usually mounted at /api/admin/access in your server.js
  */
 
-// ✅ Final Route: GET /api/admin/access/list
-// Get the full list of system users for the Access Control UI
+// ✅ Get the full list of system users for the Access Control UI
+// Final Route: GET /api/admin/access/list
 router.get(
   '/list', 
   protectAdmin, 
@@ -35,8 +35,8 @@ router.get(
   getAllAdmins
 );
 
-// ✅ Final Route: POST /api/admin/access/grant
-// Create a new access record (Grant access to someone else)
+// ✅ Create a new access record (Grant access to someone else)
+// Final Route: POST /api/admin/access/grant
 router.post(
   '/grant', 
   protectAdmin, 
@@ -44,8 +44,8 @@ router.post(
   grantAccess
 );
 
-// ✅ Final Route: PATCH /api/admin/access/toggle/:id
-// Deactivate or Activate an access record (The "Kill Switch")
+// ✅ Deactivate or Activate an access record (The "Kill Switch")
+// Final Route: PATCH /api/admin/access/toggle/:id
 router.patch(
   '/toggle/:id', 
   protectAdmin, 
