@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import Admin from '../models/Access.js'; // ✅ Imported the new Admin model
 
 /**
- * 🔐 Protect: Ensures the user is logged in with a valid JWT
+ * 🔐 Protect: Ensures the user is logged in with a valid JWT (Regular Users/Owners)
  */
 export const protect = async (req, res, next) => {
   let token;
@@ -31,12 +31,12 @@ export const protect = async (req, res, next) => {
   }
 
   if (!token) {
-    res.status(401).json({ error: "Not authorized, no token provided." });
+    return res.status(401).json({ error: "Not authorized, no token provided." });
   }
 };
 
 /**
- * 👑 Admin Only: Ensures the user has an admin role
+ * 👑 Admin Only: Ensures the user has an admin role (Regular User Model)
  */
 export const admin = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
@@ -59,7 +59,7 @@ export const isOwner = (req, res, next) => {
 
 /**
  * 🛡️ NEW: protectAdmin
- * Specific for the System Admin Access model
+ * Specific for the System Admin Access model (Access.js collection)
  */
 export const protectAdmin = async (req, res, next) => {
   let token;
@@ -69,22 +69,27 @@ export const protectAdmin = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      // Use the Admin model for system-level access
-      req.user = await Admin.findById(decoded.id).select('-passwordHash');
+      // ✅ Specifically look in the Admin (Access) collection
+      const adminUser = await Admin.findById(decoded.id).select('-passwordHash');
 
-      if (!req.user || !req.user.isActive) {
+      if (!adminUser) {
+        return res.status(401).json({ error: "Not authorized, admin account not found." });
+      }
+
+      if (!adminUser.isActive) {
         return res.status(401).json({ error: "Not authorized, admin account inactive." });
       }
 
+      // Attach the admin user to the request
+      req.user = adminUser;
       next();
     } catch (error) {
       console.error("🔒 [Admin Auth Error]:", error.message);
       res.status(401).json({ error: "Not authorized, admin token failed." });
     }
-  }
-
-  if (!token) {
-    res.status(401).json({ error: "Not authorized, no admin token provided." });
+  } else {
+    // Ensuring we return here so the code doesn't proceed to "next()"
+    return res.status(401).json({ error: "Not authorized, no admin token provided." });
   }
 };
 
@@ -94,6 +99,7 @@ export const protectAdmin = async (req, res, next) => {
  */
 export const authorize = (...roles) => {
   return (req, res, next) => {
+    // Checks the 'accessLevel' field specifically found in the Admin model
     if (!req.user || !roles.includes(req.user.accessLevel)) {
       return res.status(403).json({ 
         error: `Forbidden: Access level '${req.user?.accessLevel}' unauthorized.` 
@@ -102,3 +108,5 @@ export const authorize = (...roles) => {
     next();
   };
 };
+
+export default { protect, admin, isOwner, protectAdmin, authorize };

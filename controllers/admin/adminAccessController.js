@@ -73,13 +73,16 @@ export const loginAdmin = async (req, res) => {
       { expiresIn: '12h' }
     );
 
+    // ✅ Added 'role: admin' to the response to prevent frontend auth conflicts
     res.status(200).json({
       success: true,
       token,
       admin: {
         id: admin._id,
         fullName: admin.fullName,
-        accessLevel: admin.accessLevel
+        email: admin.email,
+        accessLevel: admin.accessLevel,
+        role: 'admin' 
       }
     });
   } catch (error) {
