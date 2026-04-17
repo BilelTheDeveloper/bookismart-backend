@@ -1,9 +1,9 @@
 import User from '../models/User.js';
-import bcrypt from 'bcryptjs'; // Using bcryptjs for consistency with your step3
+import bcrypt from 'bcryptjs'; 
 import jwt from 'jsonwebtoken';
 
 /**
- * @desc    Authenticate user & get token
+ * @desc    Authenticate user & get token via HttpOnly Cookie
  * @route   POST /api/auth/login
  * @access  Public
  */
@@ -18,8 +18,6 @@ export const loginController = async (req, res) => {
     }
 
     // 2. Check Account Status
-    // Only 'active' users can log into the dashboard. 
-    // If they are 'on_boarding' or 'review', we block entry.
     if (user.accountStatus !== 'active') {
       return res.status(403).json({ 
         error: `Login restricted. Your account is currently: ${user.accountStatus.replace('_', ' ')}. Please contact support or wait for Admin approval.` 
@@ -32,27 +30,35 @@ export const loginController = async (req, res) => {
       return res.status(400).json({ error: "Invalid password. Please try again." });
     }
 
-    // 4. Update Last Login Date (Good for tracking active merchants)
+    // 4. Update Last Login Date
     user.lastLogin = new Date();
     await user.save();
 
     // 5. Generate JWT Token
-    // We include the ID and Role so the frontend knows where to redirect them
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '1d' } // Token lasts for 24 hours
+      { expiresIn: '1d' } 
     );
 
-    // 6. Prepare user data for Frontend
-    // This includes the profilePicUrl we saved to Cloudinary during registration
+    // ✅ 6. Set HttpOnly Cookie
+    // This is where the magic happens. The token is sent to a secure vault in the browser.
+    res.cookie('token', token, {
+      httpOnly: true, // Prevents JavaScript from reading the cookie (XSS Protection)
+      secure: process.env.NODE_ENV === 'production', // Only sends over HTTPS in production
+      sameSite: 'strict', // Prevents the cookie from being sent on cross-site requests (CSRF Protection)
+      maxAge: 24 * 60 * 60 * 1000 // 1 day in milliseconds (matches JWT expiration)
+    });
+
+    // 7. Prepare user data for Frontend
     const userData = user.toObject();
     delete userData.password;
-    delete userData.otpCodes; // Remove sensitive OTP data if it exists
+    delete userData.otpCodes; 
 
+    // ✅ We NO LONGER send the token in this JSON object.
+    // The browser automatically handles it via the cookie header.
     res.status(200).json({
       success: true,
-      token,
       user: userData,
       message: `Welcome back, ${user.fullName}!`
     });

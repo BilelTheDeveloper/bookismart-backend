@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
+import cookieParser from 'cookie-parser'; // ✅ NEW: Required for HttpOnly cookies
 import { fileURLToPath } from 'url';
 import connectDB from './config/db.js';
 
@@ -13,7 +14,6 @@ import adminVerificationRoutes from './routes/admin/userVerification.js';
 
 // --- Domain Specific Routes ---
 import adminWebVerificationRoutes from './routes/admin/webVerificationRoutes.js';
-import adminAccessRoutes from './routes/admin/adminRoutes.js'; // ✅ NEW: Admin Access Routes
 import merchantWebsiteRoutes from './routes/merchant/websiteRoutes.js';
 import publicRoutes from './routes/publicRoutes.js'; 
 
@@ -31,13 +31,17 @@ const app = express();
  * ⚡ SUPER POWER UPGRADES
  */
 
-// A. Trust Proxy (Essential for Render/Vercel deployments)
+// A. Trust Proxy (Essential for Render/Vercel/Cloudflare deployments)
 app.set('trust proxy', 1);
 
 // B. Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: false, 
 })); 
+
+// ✅ NEW: Cookie Parser Middleware
+// This allows the server to read cookies sent by the browser
+app.use(cookieParser());
 
 /**
  * 🛡️ DYNAMIC CORS WHITELIST
@@ -46,11 +50,12 @@ const allowedOrigins = [
   "http://localhost:5173",           // Local Development
   "https://bookiify.vercel.app",    // Production Frontend (Vercel)
   "https://bookify.tn",             // Production Domain
-  process.env.CLIENT_URL             // Optional: URL set in Render environment
+  process.env.CLIENT_URL             // Optional: URL set in environment
 ].filter(Boolean);
 
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.includes(origin)) {
@@ -60,7 +65,7 @@ const corsOptions = {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true,
+  credentials: true, // ✅ CRITICAL: Must be true to allow HttpOnly cookies
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   optionsSuccessStatus: 200 
@@ -89,17 +94,16 @@ app.use('/api/public', publicRoutes);
 app.use('/api/admin/user-verification', adminVerificationRoutes);
 
 /**
- * ✅ ADMIN WEBSITE AUDIT & ACCESS CONTROL
+ * ✅ ADMIN WEBSITE AUDIT
  */
 app.use('/api/admin/websites', adminWebVerificationRoutes); 
-app.use('/api/admin/access', adminAccessRoutes); // ✅ NEW: Mounted Admin Access logic
 
 // Merchant Control Panel
 app.use('/api/merchant/website', merchantWebsiteRoutes); 
 
 // Root Route
 app.get('/', (req, res) => {
-  res.send('Bookismart API is running with Super Powers... 🚀');
+  res.send('Bookismart API is running with Secure Cookies... 🚀');
 });
 
 // 4. Global Error Handling
