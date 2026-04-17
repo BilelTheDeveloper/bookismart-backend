@@ -1,6 +1,6 @@
 import express from 'express';
 // ✅ Updated import path to match your controller naming convention
-import { loginController } from '../controllers/loginController.js';
+import { loginController } from '../controllers/logincontroller.js';
 
 const router = express.Router();
 
