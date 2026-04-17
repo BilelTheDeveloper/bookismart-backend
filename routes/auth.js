@@ -1,5 +1,4 @@
 import express from 'express';
-// Import your custom Cloudinary utility
 import uploadCloudinary from '../utils/uploadCloudinary.js';
 
 // --- Import Step Controllers ---
@@ -9,16 +8,14 @@ import step3Security from '../controllers/auth/step3-security.js';
 import step4KYC from '../controllers/auth/step4-kyc.js';
 import step5Finalize from '../controllers/auth/step5-finalize.js';
 
-// ✅ NEW: Import protect middleware for the session check
+// 🛡️ Middleware
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 /**
  * 🆔 SESSION IDENTITY CHECK
- * @route   GET /api/auth/me
- * @desc    Returns current user from the secure cookie
- * @access  Private
+ * This verifies the HttpOnly cookie and returns the user data to AuthContext.
  */
 router.get('/me', protect, (req, res) => {
   res.status(200).json({ 
@@ -28,31 +25,41 @@ router.get('/me', protect, (req, res) => {
 });
 
 /**
- * 🚪 SECURE LOGOUT
- * @route   POST /api/auth/logout
- * @desc    Clears the HttpOnly cookie
- * @access  Public
+ * 🚪 SECURE LOGOUT (The Kill Switch)
+ * IMPORTANT: The cookie settings here MUST match the LoginController exactly.
  */
 router.post('/logout', (req, res) => {
+  // Check environment for secure flag consistency
+  const isProduction = process.env.NODE_ENV === 'production' || req.get('host').includes('onrender.com');
+
   res.cookie('token', '', {
     httpOnly: true,
-    expires: new Date(0), // Delete immediately
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: true,       // 🔒 Must be true to clear a 'sameSite: none' cookie
+    sameSite: 'none',   // 🌍 Must match the LoginController exactly
+    expires: new Date(0), // Sets expiration to the past (Jan 1, 1970)
+    path: '/',          // Ensures the cookie is cleared for the whole domain
   });
-  res.status(200).json({ success: true, message: "Logged out successfully" });
+
+  console.log(`🧹 [Auth]: Secure logout successful at ${new Date().toISOString()}`);
+  
+  res.status(200).json({ 
+    success: true, 
+    message: "Logged out successfully. Session destroyed." 
+  });
 });
 
-// --- Step 1: Profile Registration ---
+// --- Multi-Step Onboarding Routes ---
+
+// Step 1: Profile Registration
 router.post('/step-1', uploadCloudinary.single('profilePic'), step1Profile);
 
-// --- Step 2: OTP Verification ---
+// Step 2: OTP Verification
 router.post('/step-2', step2Verify);
 
-// --- Step 3: Password Security ---
+// Step 3: Password Security
 router.post('/step-3', step3Security);
 
-// --- Step 4: Identity Verification (KYC) ---
+// Step 4: Identity Verification (KYC)
 const kycUpload = uploadCloudinary.fields([
   { name: 'idFront', maxCount: 1 },
   { name: 'idBack', maxCount: 1 },
@@ -60,7 +67,7 @@ const kycUpload = uploadCloudinary.fields([
 ]);
 router.post('/step-4', kycUpload, step4KYC);
 
-// --- Step 5: Finalize Application ---
+// Step 5: Finalize Application
 router.post('/step-5', step5Finalize);
 
 export default router;
