@@ -20,7 +20,7 @@ export const loginController = async (req, res) => {
     // 2. Check Account Status
     if (user.accountStatus !== 'active') {
       return res.status(403).json({ 
-        error: `Login restricted. Your account is currently: ${user.accountStatus.replace('_', ' ')}. Please contact support or wait for Admin approval.` 
+        error: `Login restricted. Your account is currently: ${user.accountStatus.replace('_', ' ')}. Please contact support.` 
       });
     }
 
@@ -41,13 +41,15 @@ export const loginController = async (req, res) => {
       { expiresIn: '1d' } 
     );
 
-    // ✅ 6. Set HttpOnly Cookie
-    // This is where the magic happens. The token is sent to a secure vault in the browser.
+    // ✅ 6. Set HttpOnly Cookie (FIXED FOR RENDER/VERCEL)
     res.cookie('token', token, {
-      httpOnly: true, // Prevents JavaScript from reading the cookie (XSS Protection)
-      secure: process.env.NODE_ENV === 'production', // Only sends over HTTPS in production
-      sameSite: 'strict', // Prevents the cookie from being sent on cross-site requests (CSRF Protection)
-      maxAge: 24 * 60 * 60 * 1000 // 1 day in milliseconds (matches JWT expiration)
+      httpOnly: true, 
+      // 🛡️ CRITICAL FIX: 
+      // In production (Render/Vercel), we MUST use secure: true and sameSite: 'none'
+      // because the frontend and backend have different URLs.
+      secure: true, 
+      sameSite: 'none', 
+      maxAge: 24 * 60 * 60 * 1000 
     });
 
     // 7. Prepare user data for Frontend
@@ -55,8 +57,6 @@ export const loginController = async (req, res) => {
     delete userData.password;
     delete userData.otpCodes; 
 
-    // ✅ We NO LONGER send the token in this JSON object.
-    // The browser automatically handles it via the cookie header.
     res.status(200).json({
       success: true,
       user: userData,
