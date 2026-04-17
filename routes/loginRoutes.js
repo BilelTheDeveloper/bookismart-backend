@@ -1,15 +1,21 @@
 import express from 'express';
-// Ensure the path and extension (.js) are correct for your structure
-import { loginController } from '../controllers/logincontroller.js';
+// ✅ Updated import path to match your controller naming convention
+import { loginController } from '../controllers/loginController.js';
 
-const loginRoutes = express.Router();
+const router = express.Router();
 
 /**
  * @route   POST /api/auth/login
- * @desc    Handle merchant and admin authentication
+ * @desc    Handle authentication for Admins, Owners, and Customers
  * @access  Public
+ * @note    This route issues an HttpOnly cookie for session management.
  */
-loginRoutes.post('/login', loginController);
+router.post('/login', loginController);
 
-// Exporting as default so it matches your server.js import style
-export default loginRoutes;
+/**
+ * @note You can add other entry-level auth routes here in the future,
+ * such as /forgot-password or /reset-password.
+ */
+
+// Exporting as default to match your server.js: app.use('/api/auth', loginRoutes);
+export default router;
