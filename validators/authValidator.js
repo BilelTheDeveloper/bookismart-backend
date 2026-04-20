@@ -36,11 +36,17 @@ export const validateSignup = (data) => {
       .messages({
         'string.pattern.base': 'Password must contain at least one uppercase letter, one lowercase letter, and one number.'
       }),
-      
-    // Note: onboardingStep, role, etc., are handled by the Controller/Model defaults for security
+
+    // --- FIX FOR 400 ERROR: Allow file keys in the request body ---
+    // These are processed by Multer, but Joi must allow them to exist 
+    // in the body to avoid the "field not allowed" rejection.
+    idFront: Joi.any().optional(),
+    idBack: Joi.any().optional(),
+    livenessVideo: Joi.any().optional(),
+    profilePic: Joi.any().optional()
   });
 
-  return schema.validate(data, { abortEarly: false }); // Returns ALL errors found, not just the first one
+  return schema.validate(data, { abortEarly: false }); // Returns ALL errors found
 };
 
 /**
