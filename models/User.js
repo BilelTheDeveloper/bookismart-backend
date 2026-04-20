@@ -25,7 +25,7 @@ const UserSchema = new mongoose.Schema({
   },
   role: { 
     type: String, 
-    enum: ['owner', 'admin', 'customer'], 
+    enum: ['owner', 'admin', 'moderator'], 
     default: 'owner' 
   },
 
@@ -39,57 +39,37 @@ const UserSchema = new mongoose.Schema({
     required: true, 
     enum: [
       "Beauty & Barbers",
-    "Health & Medical",
-    "Fitness & Gyms",
-    "Creative & Media",
-    "Car Services",
-    "Maintenance",
-    "Coaching & Tutors",
-    "Consultants",
-    "Events & DJs",
-    "Grooming & Vets"
+      "Health & Medical",
+      "Fitness & Gyms",
+      "Creative & Media",
+      "Car Services",
+      "Maintenance",
+      "Coaching & Tutors",
+      "Consultants",
+      "Events & DJs",
+      "Grooming & Vets"
     ] 
   },
   ville: { 
     type: String, 
     required: true, 
     enum: [
-      "Ariana",
-    "Beja",
-    "Ben Arous",
-    "Bizerte",
-    "Gabes",
-    "Gafsa",
-    "Jendouba",
-    "Kairouan",
-    "Kasserine",
-    "Kebili",
-    "Kef",
-    "Mahdia",
-    "Manouba",
-    "Medenine",
-    "Monastir",
-    "Nabeul",
-    "Sfax",
-    "Sidi Bouzid",
-    "Siliana",
-    "Sousse",
-    "Tataouine",
-    "Tozeur",
-    "Tunis",
-    "Zaghouan"
+      "Ariana", "Beja", "Ben Arous", "Bizerte", "Gabes", "Gafsa", 
+      "Jendouba", "Kairouan", "Kasserine", "Kebili", "Kef", "Mahdia", 
+      "Manouba", "Medenine", "Monastir", "Nabeul", "Sfax", "Sidi Bouzid", 
+      "Siliana", "Sousse", "Tataouine", "Tozeur", "Tunis", "Zaghouan"
     ],
-    alias: 'city' // Maps to your React formData.city
+    alias: 'city' 
   },
   profilePicUrl: { 
-    type: String // URL from Cloudinary or S3 for business image
+    type: String 
   },
 
   // --- 3. BUSINESS LINKING (The Profile ID) ---
   profileId: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'BusinessProfile',
-    default: function() { return new mongoose.Types.ObjectId(); } // Auto-generate on creation
+    default: function() { return new mongoose.Types.ObjectId(); } 
   },
 
   // --- 4. VERIFICATION & SECURITY (Step 2 & 4) ---
@@ -117,11 +97,17 @@ const UserSchema = new mongoose.Schema({
     rejectionReason: { type: String }
   },
 
-  // --- 5. PAYMENT & SUBSCRIPTION TAGS ---
+  // --- 5. ONBOARDING TRACKER (New Update) ---
+  onboardingStep: {
+    type: Number,
+    default: 1, // 1: Global, 2: OTP, 3: Password, 4: KYC, 5: Completed
+    enum: [1, 2, 3, 4, 5]
+  },
+
+  // --- 6. PAYMENT & SUBSCRIPTION TAGS ---
   paymentInfo: {
-    // For Tunisia: Flouci / Konnect / Stripe integration tags
-    walletAddress: { type: String }, // e.g., for Flouci integration
-    merchantId: { type: String },    // For routing payments to the specific owner
+    walletAddress: { type: String }, 
+    merchantId: { type: String },    
     currency: { type: String, default: 'TND' },
     
     subscription: {
@@ -137,13 +123,12 @@ const UserSchema = new mongoose.Schema({
       },
       trialEndsAt: { 
         type: Date, 
-        default: () => new Date(+new Date() + 90*24*60*60*1000) // Default 3-month trial
+        default: () => new Date(+new Date() + 90*24*60*60*1000) 
       },
       lastPaymentDate: { type: Date },
       nextBillingDate: { type: Date }
     },
     
-    // History of transactions
     transactionHistory: [{
       transactionId: String,
       amount: Number,
@@ -152,26 +137,34 @@ const UserSchema = new mongoose.Schema({
     }]
   },
 
-  // --- 6. APP SETTINGS & METADATA ---
+  // --- 7. APP SETTINGS & METADATA ---
   accountStatus: { 
     type: String, 
     enum: ['active', 'suspended', 'on_boarding', 'review'], 
     default: 'on_boarding' 
   },
   lastLogin: { type: Date },
-  fcmToken: { type: String }, // For push notifications
-  
+  fcmToken: { type: String }, 
+
+  // --- 8. ADVANCED SECURITY & TOKEN ROTATION (New Vault) ---
+  refreshTokens: [{
+    token: { type: String, required: true },
+    deviceId: { type: String, required: true }, // From createDeviceFingerprint
+    lastKnownIp: { type: String },
+    expiresAt: { type: Date, required: true },
+    createdAt: { type: Date, default: Date.now }
+  }],
+
 }, { 
-  timestamps: true // Automatically creates createdAt and updatedAt
+  timestamps: true 
 });
 
-// Virtual for easy checking if the user is currently in trial
 UserSchema.virtual('isTrialActive').get(function() {
   return this.paymentInfo.subscription.trialEndsAt > Date.now();
 });
 
-// Ensure virtuals are included when converting to JSON
 UserSchema.set('toJSON', { virtuals: true });
 UserSchema.set('toObject', { virtuals: true });
-const User = mongoose.model('User', UserSchema); // ✅ ADD THIS
+
+const User = mongoose.model('User', UserSchema);
 export default User;

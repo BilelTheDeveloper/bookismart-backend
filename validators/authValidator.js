@@ -1,0 +1,55 @@
+import Joi from 'joi';
+
+// 1. Exact list from your User Model to prevent "City Injection"
+const tunisianCities = [
+  "Ariana", "Beja", "Ben Arous", "Bizerte", "Gabes", "Gafsa", 
+  "Jendouba", "Kairouan", "Kasserine", "Kebili", "Kef", "Mahdia", 
+  "Manouba", "Medenine", "Monastir", "Nabeul", "Sfax", "Sidi Bouzid", 
+  "Siliana", "Sousse", "Tataouine", "Tozeur", "Tunis", "Zaghouan"
+];
+
+// 2. Exact categories from your User Model
+const businessCategories = [
+  "Beauty & Barbers", "Health & Medical", "Fitness & Gyms", 
+  "Creative & Media", "Car Services", "Maintenance", 
+  "Coaching & Tutors", "Consultants", "Events & DJs", "Grooming & Vets"
+];
+
+/**
+ * Validates the 5-Step Signup Data
+ * Sanitizes input (lowercase, trim) automatically
+ */
+export const validateSignup = (data) => {
+  const schema = Joi.object({
+    fullName: Joi.string().min(3).max(50).required().trim(),
+    email: Joi.string().email().required().lowercase().trim(),
+    phone: Joi.string().pattern(/^[0-9]{8,12}$/).required(),
+    businessName: Joi.string().min(2).required().trim(),
+    category: Joi.string().valid(...businessCategories).required(),
+    ville: Joi.string().valid(...tunisianCities).required(),
+    
+    // Password Rule: Min 8 chars, 1 Upper, 1 Lower, 1 Number
+    password: Joi.string()
+      .min(8)
+      .pattern(new RegExp('^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])'))
+      .required()
+      .messages({
+        'string.pattern.base': 'Password must contain at least one uppercase letter, one lowercase letter, and one number.'
+      }),
+      
+    // Note: onboardingStep, role, etc., are handled by the Controller/Model defaults for security
+  });
+
+  return schema.validate(data, { abortEarly: false }); // Returns ALL errors found, not just the first one
+};
+
+/**
+ * Validates Login credentials
+ */
+export const validateLogin = (data) => {
+  const schema = Joi.object({
+    email: Joi.string().email().required().lowercase().trim(),
+    password: Joi.string().required()
+  });
+  return schema.validate(data);
+};
