@@ -103,7 +103,8 @@ export const register = async (req, res) => {
       kyc: {
         idFrontUrl: req.files?.idFront ? req.files.idFront[0].path : null,
         idBackUrl: req.files?.idBack ? req.files.idBack[0].path : null,
-        livenessVideoUrl: req.files?.livenessVideo ? req.files.livenessVideo[0].path : null,
+        // UPDATE: Changed livenessVideoUrl to livePhotoUrl to match your User Model
+        livePhotoUrl: req.files?.livenessVideo ? req.files.livenessVideo[0].path : null,
         status: 'pending'
       }
     });
