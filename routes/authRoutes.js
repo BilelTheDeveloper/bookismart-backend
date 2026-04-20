@@ -19,16 +19,17 @@ import upload from '../config/cloudinary.js';
  * These routes do not require a token and are used for Onboarding & Auth.
  */
 
-// 1. OTP Verification (Added to fix 404)
+// 1. OTP Verification
 router.post('/send-otp', sendOTP);
 router.post('/verify-otp', verifyOTP);
 
 // 2. Final 5-Step Registration (Handles Text + Files)
-// Fields: idFront (1 image), idBack (1 image), livenessVideo (1 video)
+// FIX: Added 'profilePic' to the allowed fields list so Multer doesn't block the request
 router.post('/register', upload.fields([
     { name: 'idFront', maxCount: 1 },
     { name: 'idBack', maxCount: 1 },
-    { name: 'livenessVideo', maxCount: 1 }
+    { name: 'livenessVideo', maxCount: 1 },
+    { name: 'profilePic', maxCount: 1 }
 ]), register);
 
 // 3. Standard Secure Login

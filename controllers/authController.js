@@ -81,12 +81,15 @@ export const register = async (req, res) => {
       ville,
       accountStatus: 'review', 
       onboardingStep: 5,
+      // --- UPDATED KYC MAPPING ---
       kyc: {
         idFrontUrl: req.files?.idFront ? req.files.idFront[0].path : null,
         idBackUrl: req.files?.idBack ? req.files.idBack[0].path : null,
         livePhotoUrl: req.files?.livenessVideo ? req.files.livenessVideo[0].path : null,
         status: 'pending'
-      }
+      },
+      // Save profile picture URL if it exists
+      profilePicUrl: req.files?.profilePic ? req.files.profilePic[0].path : null
     });
 
     res.status(201).json({ 
