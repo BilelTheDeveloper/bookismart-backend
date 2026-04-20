@@ -2,7 +2,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import multer from 'multer';
 
-// Configuration (Rule 1: Uses your live environment variables)
+// Configuration
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -12,28 +12,29 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
-    // 1. Determine the folder based on file type
+    // 1. Dynamic Resource Type detection
+    // This ensures Cloudinary treats videos as videos and images as images
+    const isVideo = file.fieldname === 'livenessVideo';
+    
     let folder = 'bookiify/others';
-    let allowedFormats = ['jpg', 'png', 'jpeg'];
-    let resourceType = 'image';
-
     if (file.fieldname === 'idFront' || file.fieldname === 'idBack') {
       folder = 'bookiify/kyc-docs';
     } else if (file.fieldname === 'profilePic') {
       folder = 'bookiify/profiles';
     } else if (file.fieldname === 'livenessVideo') {
       folder = 'bookiify/liveness-videos';
-      allowedFormats = ['webm', 'mp4'];
-      resourceType = 'video'; // Critical for your 5s video
     }
 
     return {
       folder: folder,
-      format: allowedFormats.includes(file.mimetype.split('/')[1]) 
-               ? file.mimetype.split('/')[1] 
-               : allowedFormats[0],
-      resource_type: resourceType,
-      public_id: `${file.fieldname}-${Date.now()}-${Math.round(Math.random() * 1E9)}`,
+      resource_type: isVideo ? 'video' : 'image', // Critical fix
+      // We use 'auto' or specific formats to prevent corruption
+      format: isVideo ? 'mp4' : undefined, 
+      public_id: `${file.fieldname}-${Date.now()}`,
+      // Security: transformations to optimize files on upload
+      transformation: isVideo 
+        ? [{ quality: "auto", fetch_format: "auto" }] 
+        : [{ width: 1200, crop: "limit", quality: "auto" }]
     };
   },
 });
@@ -42,15 +43,22 @@ const storage = new CloudinaryStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB Limit for the 5s Video
+    fileSize: 15 * 1024 * 1024, // Increased to 15MB for high-quality 5s videos
   },
   fileFilter: (req, file, cb) => {
-    // Advanced Sanitization: Only allow specific mime types
-    const allowedTypes = ['image/jpeg', 'image/png', 'video/webm', 'video/mp4'];
+    const allowedTypes = [
+      'image/jpeg', 
+      'image/png', 
+      'image/jpg', 
+      'video/webm', 
+      'video/mp4', 
+      'video/quicktime' // Added for iPhone users (MOV)
+    ];
+    
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only JPG, PNG, and WEBM/MP4 are allowed.'), false);
+      cb(new Error(`Unsupported file type: ${file.mimetype}`), false);
     }
   }
 });
