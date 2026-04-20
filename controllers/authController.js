@@ -7,26 +7,20 @@ import {
 import { validateSignup } from '../validators/authValidator.js';
 import crypto from 'crypto';
 
-// Temporary In-Memory Store for OTPs (In Production, use Redis)
 const otpStore = new Map();
 
 /**
- * @desc    Send OTP to Terminal for Testing (Step 2)
+ * @desc    Send OTP to Terminal for Testing
  */
 export const sendOTP = async (req, res) => {
-  const { type, target } = req.body; // type: 'email' or 'phone'
-
+  const { type, target } = req.body;
   try {
-    // Generate an 8-character secure alphanumeric code
     const otpCode = crypto.randomBytes(4).toString('hex').toUpperCase();
-    
-    // Store it for 10 minutes
     otpStore.set(`${type}:${target}`, {
       code: otpCode,
       expires: Date.now() + 10 * 60 * 1000
     });
 
-    // 🚀 TEST MODE: Log to Terminal
     console.log(`
     ╔════════════════════════════════════════════════════════════╗
     ║              🔥 BOOKIIFY DEVELOPMENT VAULT 🔥              ║
@@ -50,46 +44,33 @@ export const verifyOTP = async (req, res) => {
   const { type, target, code } = req.body;
   const storedData = otpStore.get(`${type}:${target}`);
 
-  if (!storedData) {
-    return res.status(400).json({ message: "OTP expired or not requested" });
-  }
-
-  if (storedData.code !== code) {
-    return res.status(400).json({ message: "Invalid verification code" });
-  }
-
+  if (!storedData) return res.status(400).json({ message: "OTP expired or not requested" });
+  if (storedData.code !== code) return res.status(400).json({ message: "Invalid verification code" });
   if (Date.now() > storedData.expires) {
     otpStore.delete(`${type}:${target}`);
     return res.status(400).json({ message: "OTP has expired" });
   }
 
-  // Success: Clear the OTP from memory
   otpStore.delete(`${type}:${target}`);
   res.status(200).json({ message: "Verification successful" });
 };
 
 /**
  * @desc    Register a new professional (The 5-Step Finalization)
- * @route   POST /api/auth/register
- * @access  Public
  */
 export const register = async (req, res) => {
   try {
-    // 1. Server-Side Validation (The Shield)
     const { error } = validateSignup(req.body);
     if (error) return res.status(400).json({ errors: error.details.map(d => d.message) });
 
     const { email, phone, password, fullName, businessName, category, ville } = req.body;
 
-    // 2. Check for existing users (Email or Phone)
     const userExists = await User.findOne({ $or: [{ email }, { phone }] });
     if (userExists) return res.status(409).json({ message: "User with this email or phone already exists" });
 
-    // 3. Hash Password (Bcrypt + Salt)
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 4. Create User in 'review' status
     const newUser = await User.create({
       fullName,
       email,
@@ -98,12 +79,11 @@ export const register = async (req, res) => {
       businessName,
       category,
       ville,
-      accountStatus: 'review', // Admin must review
+      accountStatus: 'review', 
       onboardingStep: 5,
       kyc: {
         idFrontUrl: req.files?.idFront ? req.files.idFront[0].path : null,
         idBackUrl: req.files?.idBack ? req.files.idBack[0].path : null,
-        // UPDATE: Changed livenessVideoUrl to livePhotoUrl to match your User Model
         livePhotoUrl: req.files?.livenessVideo ? req.files.livenessVideo[0].path : null,
         status: 'pending'
       }
@@ -119,9 +99,7 @@ export const register = async (req, res) => {
 };
 
 /**
- * @desc    Login & Issue Dual-Tokens with Fingerprinting
- * @route   POST /api/auth/login
- * @access  Public
+ * @desc    Login with Status Protection
  */
 export const login = async (req, res) => {
   const { email, password } = req.body;
@@ -130,35 +108,36 @@ export const login = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
-    // Verify Password
+    // Block login if account is not active
+    if (user.accountStatus === 'review') {
+      return res.status(403).json({ message: "Your account is under review. Please wait for admin approval." });
+    }
+    if (user.accountStatus === 'suspended') {
+      return res.status(403).json({ message: "Your account has been suspended. Contact support." });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
 
-    // Create Device Fingerprint (Device Tracking)
     const deviceId = createDeviceFingerprint(req);
-    const ip = req.ip;
-
-    // Generate New Tokens
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
 
-    // 5. Token Rotation Logic
     user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
     user.refreshTokens.push({
       token: refreshToken,
       deviceId,
-      lastKnownIp: ip,
+      lastKnownIp: req.ip,
       expiresAt: refreshTokenExpiresAt
     });
 
     user.lastLogin = Date.now();
     await user.save();
 
-    // 6. Set HttpOnly Cookie
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 Days
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     res.json({
@@ -176,9 +155,38 @@ export const login = async (req, res) => {
 };
 
 /**
+ * @desc    Admin: Approve or Reject KYC/Account
+ * @route   PATCH /api/auth/review-user/:id
+ */
+export const reviewUser = async (req, res) => {
+  const { id } = req.params;
+  const { action, reason } = req.body; // action: 'approve' or 'reject'
+
+  try {
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (action === 'approve') {
+      user.accountStatus = 'active';
+      user.kyc.status = 'verified';
+      user.kyc.verifiedAt = Date.now();
+    } else if (action === 'reject') {
+      user.accountStatus = 'on_boarding'; // Send them back to onboarding or keep in review
+      user.kyc.status = 'rejected';
+      user.kyc.rejectionReason = reason || "Documents did not meet requirements.";
+    } else {
+      return res.status(400).json({ message: "Invalid action" });
+    }
+
+    await user.save();
+    res.json({ message: `User account has been ${action}ed successfully.` });
+  } catch (err) {
+    res.status(500).json({ message: "Review update failed" });
+  }
+};
+
+/**
  * @desc    Refresh Access Token
- * @route   POST /api/auth/refresh
- * @access  Public
  */
 export const refresh = async (req, res) => {
   const incomingRefreshToken = req.cookies.refreshToken;
