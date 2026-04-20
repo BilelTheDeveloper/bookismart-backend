@@ -1,40 +1,49 @@
 import express from 'express';
 const router = express.Router();
 
-// Controllers
-import { register, login, refresh } from '../controllers/authController.js';
+// Controllers (Now including OTP functions)
+import { 
+  register, 
+  login, 
+  refresh, 
+  sendOTP, 
+  verifyOTP 
+} from '../controllers/authController.js';
 
-// Middlewares (Rule 3)
+// Middlewares
 import { protect, isAdmin } from '../middleware/authMiddleware.js';
-import upload from '../config/cloudinary.js'; // To be created for Multer/Cloudinary
+import upload from '../config/cloudinary.js'; 
 
 /**
  * --- PUBLIC ROUTES ---
+ * These routes do not require a token and are used for Onboarding & Auth.
  */
 
-// 1. Final 5-Step Registration (Handles Text + Files)
-// We expect: idFront (1 image), idBack (1 image), livenessVideo (1 video)
+// 1. OTP Verification (Added to fix 404)
+router.post('/send-otp', sendOTP);
+router.post('/verify-otp', verifyOTP);
+
+// 2. Final 5-Step Registration (Handles Text + Files)
+// Fields: idFront (1 image), idBack (1 image), livenessVideo (1 video)
 router.post('/register', upload.fields([
     { name: 'idFront', maxCount: 1 },
     { name: 'idBack', maxCount: 1 },
     { name: 'livenessVideo', maxCount: 1 }
 ]), register);
 
-// 2. Standard Secure Login
+// 3. Standard Secure Login
 router.post('/login', login);
 
-// 3. Silent Token Refresh (Uses HttpOnly Cookie)
+// 4. Silent Token Refresh (Uses HttpOnly Cookie)
 router.post('/refresh', refresh);
 
 /**
  * --- PROTECTED ROUTES ---
+ * These require the 'protect' middleware to verify the JWT and Fingerprint.
  */
 
-// 4. Identity Verification (Admins Only - Step 4 Review)
-// This is the API route for your "See Dossier" frontend page
+// 5. Identity Verification (Admins Only)
 router.get('/admin/kyc-requests', protect, isAdmin, async (req, res) => {
-    // This logic usually goes in a separate kycController, 
-    // but we can place a placeholder here for now.
     res.json({ message: "Secure KYC data access granted." });
 });
 
