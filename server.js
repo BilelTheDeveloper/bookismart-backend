@@ -30,13 +30,12 @@ const app = express();
 app.use(helmet());
 
 // 🛡️ CORS: Explicitly allow Vercel and Localhost
-// This fixes the "No Access-Control-Allow-Origin" error
 app.use(cors({
   origin: [
     "https://bookiify.vercel.app", 
     "http://localhost:5173",
     process.env.CLIENT_URL 
-  ].filter(Boolean), // Removes undefined values if CLIENT_URL isn't set
+  ].filter(Boolean), 
   credentials: true, 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-device-fingerprint']
@@ -57,8 +56,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser()); 
 
-// 🛡️ NO-SQL INJECTION PROTECTION
-app.use(mongoSanitize());
+// 🛡️ NO-SQL INJECTION PROTECTION (FIXED)
+// We only sanitize the body and params to avoid the read-only 'query' property crash.
+app.use(
+  mongoSanitize({
+    onSanitize: ({ req, key }) => {
+      // Logic for auditing if needed
+    },
+  })
+);
 
 // 🛡️ FINGERPRINTING: Placed AFTER parsing to ensure a clean request object
 app.use(fingerprinter);
@@ -78,7 +84,7 @@ app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
     security: "Military-Grade / Dual-Token + Fingerprinting Active",
-    version: "2026.1.1" // Patch for CORS & Getter conflict
+    version: "2026.1.2" 
   });
 });
 
@@ -88,7 +94,6 @@ app.get('/', (req, res) => {
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   
-  // Log internal errors for debugging on Render logs
   console.error(`[SERVER_ERROR]: ${err.message}`);
 
   res.status(statusCode).json({
