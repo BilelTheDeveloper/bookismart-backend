@@ -1,13 +1,14 @@
 import User from '../models/User.js';
 
 /**
- * 🔒 MILITARY-GRADE ADMIN GUARD
- * This middleware acts as the second "Checkpoint" after the token is verified.
- * It prevents "Ghost Admins" (users whose roles were revoked but still have a valid token).
+ * 🔒 MILITARY-GRADE ADMIN GUARD (Cookie-Protocol Edition)
+ * Purpose: Acts as the second "Checkpoint" after the token is verified.
+ * Logic: Validates the user's live role and status against the database.
  */
 export const adminGuard = async (req, res, next) => {
   try {
     // 1. Check if 'protect' middleware successfully attached the user
+    // Since we use HttpOnly cookies, the user must be authenticated first.
     if (!req.user) {
       return res.status(401).json({ 
         success: false, 
@@ -16,8 +17,8 @@ export const adminGuard = async (req, res, next) => {
     }
 
     // 2. Real-Time Database Validation
-    // We fetch the latest status directly from DB to prevent stale token bypass
-    const user = await User.findById(req.user._id).select('role accountStatus kyc');
+    // We fetch fresh data to ensure the HttpOnly cookie hasn't outlived the user's permissions.
+    const user = await User.findById(req.user._id).select('role accountStatus kyc email');
 
     if (!user) {
       return res.status(404).json({ 
@@ -27,7 +28,7 @@ export const adminGuard = async (req, res, next) => {
     }
 
     // 3. Status Integrity Check
-    // Even if the user is an admin, they cannot enter if they are suspended
+    // Prevents access if an account was suspended AFTER the cookie was issued.
     if (user.accountStatus !== 'active') {
       return res.status(403).json({ 
         success: false, 
@@ -35,13 +36,15 @@ export const adminGuard = async (req, res, next) => {
       });
     }
 
-    // 4. Role Hierarchy Verification
-    // According to your User.js enum: ['owner', 'admin', 'moderator']
-    // Only 'admin' and 'owner' are allowed into the Dashboard
+    /**
+     * 4. Role Hierarchy Verification
+     * IMPORTANT: We keep 'admin' and 'owner' as authorized for the backend logic,
+     * but your frontend AdminGuard will filter which dashboard they actually see.
+     */
     const authorizedRoles = ['admin', 'owner'];
     
     if (!authorizedRoles.includes(user.role)) {
-      console.warn(`[SECURITY ALERT]: Unauthorized Admin access attempt by ${user.email} from IP ${req.headers['x-forwarded-for'] || req.socket.remoteAddress}`);
+      console.warn(`[SECURITY ALERT]: Unauthorized access attempt by ${user.email}`);
       
       return res.status(403).json({ 
         success: false, 
@@ -49,9 +52,10 @@ export const adminGuard = async (req, res, next) => {
       });
     }
 
-    // 5. Audit Logging (Optional but recommended for high-security systems)
-    // You can log who accessed the admin zone here.
-    
+    // 5. Context Injection
+    // We update req.user with the fresh DB data for the next controller.
+    req.user = user;
+
     next(); // Security checks passed. Welcome to the Vault.
     
   } catch (error) {

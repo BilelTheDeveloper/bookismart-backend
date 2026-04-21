@@ -23,9 +23,9 @@ connectDB();
 const app = express();
 
 /**
- * 🛡️ RENDER PROXY TRUST (CRITICAL FIX)
- * This allows express-rate-limit to see the real user IP instead of the 
- * Render proxy IP, preventing the "Unexpected X-Forwarded-For" error.
+ * 🛡️ RENDER PROXY TRUST
+ * Required for express-rate-limit and secure cookie "Secure" flag 
+ * to function correctly behind a proxy like Render.
  */
 app.set('trust proxy', 1);
 
@@ -36,16 +36,21 @@ app.set('trust proxy', 1);
 // 🛡️ HELMET: Protects HTTP headers
 app.use(helmet());
 
-// 🛡️ CORS: Explicitly allow Vercel and Localhost
+// 🛡️ CORS: THE TRIPLE-LOCK CONFIGURATION
 app.use(cors({
   origin: [
     "https://bookiify.vercel.app", 
     "http://localhost:5173",
     process.env.CLIENT_URL 
   ].filter(Boolean), 
-  credentials: true, 
+  credentials: true, // 🚨 CRITICAL: Allows browser to send/receive HttpOnly cookies
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-device-fingerprint']
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'x-device-fingerprint', 
+    'Accept'
+  ]
 }));
 
 // 🛡️ RATE LIMITING
@@ -61,12 +66,10 @@ app.use('/api/', limiter);
 // 🛡️ DATA PARSING
 app.use(express.json({ limit: '10mb' })); 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cookieParser()); 
+app.use(cookieParser()); // 🚨 CRITICAL: Allows Express to read req.cookies
 
 /**
- * 🛡️ NO-SQL INJECTION PROTECTION (THE "GETTER" FIX)
- * We manually target only the body and params. This is the safest way 
- * to prevent the "Cannot set property query" crash on Render.
+ * 🛡️ NO-SQL INJECTION PROTECTION
  */
 app.use((req, res, next) => {
   if (req.body) req.body = mongoSanitize.sanitize(req.body);
@@ -74,7 +77,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// 🛡️ FINGERPRINTING: Placed AFTER parsing for a clean request object
+// 🛡️ FINGERPRINTING
 app.use(fingerprinter);
 
 /**
@@ -87,8 +90,8 @@ app.use('/api/admin', adminRoutes);
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
-    security: "Military-Grade / Dual-Token + Fingerprinting Active",
-    version: "2026.1.3" 
+    security: "Military-Grade / HttpOnly Cookies + Fingerprinting Active",
+    version: "2026.1.4" 
   });
 });
 
@@ -111,5 +114,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 System Online: Port ${PORT}`);
-  console.log(`🔒 Security: Proxy-Trust, Sanitization, & Fingerprinting Active`);
+  console.log(`🔒 Security: HttpOnly Cookies, Proxy-Trust, & Fingerprinting Active`);
 });
