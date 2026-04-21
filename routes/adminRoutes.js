@@ -1,23 +1,38 @@
 import express from 'express';
 const router = express.Router();
 
+// Controllers
 import { 
   reviewUserIdentity, 
   getPendingVerifications 
 } from '../controllers/userVerificationController.js';
 
-import { protect, isAdmin } from '../middleware/authMiddleware.js';
+// Middlewares
+import { protect } from '../middleware/authMiddleware.js';
+import { adminGuard } from '../middleware/adminGuard.js';
 
 /**
- * ALL ROUTES HERE ARE HARD-PROTECTED
- * 1. Must have a valid JWT & Device Fingerprint (protect)
- * 2. Must have 'admin' role in the DB (isAdmin)
+ * 🔒 ALL ROUTES HERE ARE HARD-PROTECTED
+ * 1. Must have a valid JWT & Device Fingerprint (handled by 'protect')
+ * 2. Must pass Real-Time DB Verification, Status Check, and Role Clearance (handled by 'adminGuard')
+ * * NOTE: 'adminGuard' replaces 'isAdmin' for superior security and real-time revoking.
  */
 
-// GET /api/admin/verifications/pending
-router.get('/verifications/pending', protect, isAdmin, getPendingVerifications);
+// Global middleware application for this router
+// This ensures any new route added below is automatically secured
+router.use(protect);
+router.use(adminGuard);
 
-// PATCH /api/admin/verifications/review/:id
-router.patch('/verifications/review/:id', protect, isAdmin, reviewUserIdentity);
+/**
+ * --- ADMIN ACTION MODULE ---
+ */
+
+// @desc    Fetch all users waiting for KYC approval
+// @route   GET /api/admin/verifications/pending
+router.get('/verifications/pending', getPendingVerifications);
+
+// @desc    Approve or Reject a user's identity documents
+// @route   PATCH /api/admin/verifications/review/:id
+router.patch('/verifications/review/:id', reviewUserIdentity);
 
 export default router;
