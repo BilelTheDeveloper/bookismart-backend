@@ -1,7 +1,7 @@
 import express from 'express';
 const router = express.Router();
 
-// Controllers (Now including OTP functions)
+// Controllers (Including OTP functions)
 import { 
   register, 
   login, 
@@ -20,11 +20,16 @@ import upload from '../config/cloudinary.js';
  */
 
 // 1. OTP Verification
+// Used during the onboarding phase to verify phone/email
 router.post('/send-otp', sendOTP);
 router.post('/verify-otp', verifyOTP);
 
-// 2. Final 5-Step Registration (Handles Text + Files)
-// FIX: Added 'profilePic' to the allowed fields list so Multer doesn't block the request
+// 2. Final 5-Step Registration (Handles Text + Files via Multer/Cloudinary)
+/**
+ * 🛡️ SECURITY NOTE: 
+ * Combined with the server.js sanitization, this route remains protected 
+ * against NoSQL injection while processing multipart/form-data.
+ */
 router.post('/register', upload.fields([
     { name: 'idFront', maxCount: 1 },
     { name: 'idBack', maxCount: 1 },
@@ -33,9 +38,11 @@ router.post('/register', upload.fields([
 ]), register);
 
 // 3. Standard Secure Login
+// binds the user to the current deviceFingerprint
 router.post('/login', login);
 
 // 4. Silent Token Refresh (Uses HttpOnly Cookie)
+// Allows the Vercel frontend to stay logged in without storing JWTs in LocalStorage
 router.post('/refresh', refresh);
 
 /**
@@ -44,6 +51,7 @@ router.post('/refresh', refresh);
  */
 
 // 5. Identity Verification (Admins Only)
+// Only accessible if accountStatus is 'admin' and token is valid
 router.get('/admin/kyc-requests', protect, isAdmin, async (req, res) => {
     res.json({ message: "Secure KYC data access granted." });
 });

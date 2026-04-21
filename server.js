@@ -23,10 +23,17 @@ connectDB();
 const app = express();
 
 /**
+ * 🛡️ RENDER PROXY TRUST (CRITICAL FIX)
+ * This allows express-rate-limit to see the real user IP instead of the 
+ * Render proxy IP, preventing the "Unexpected X-Forwarded-For" error.
+ */
+app.set('trust proxy', 1);
+
+/**
  * 2. POWER SECURITY HARDENING & CORS
  */
 
-// 🛡️ HELMET: Setup first to protect headers
+// 🛡️ HELMET: Protects HTTP headers
 app.use(helmet());
 
 // 🛡️ CORS: Explicitly allow Vercel and Localhost
@@ -56,27 +63,24 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser()); 
 
-// 🛡️ NO-SQL INJECTION PROTECTION (FIXED)
-// We only sanitize the body and params to avoid the read-only 'query' property crash.
-app.use(
-  mongoSanitize({
-    onSanitize: ({ req, key }) => {
-      // Logic for auditing if needed
-    },
-  })
-);
+/**
+ * 🛡️ NO-SQL INJECTION PROTECTION (THE "GETTER" FIX)
+ * We manually target only the body and params. This is the safest way 
+ * to prevent the "Cannot set property query" crash on Render.
+ */
+app.use((req, res, next) => {
+  if (req.body) req.body = mongoSanitize.sanitize(req.body);
+  if (req.params) req.params = mongoSanitize.sanitize(req.params);
+  next();
+});
 
-// 🛡️ FINGERPRINTING: Placed AFTER parsing to ensure a clean request object
+// 🛡️ FINGERPRINTING: Placed AFTER parsing for a clean request object
 app.use(fingerprinter);
 
 /**
  * 3. ROUTE DEFINITIONS
  */
-
-// Auth & Onboarding Module
 app.use('/api/auth', authRoutes);
-
-// Admin & Verification Module
 app.use('/api/admin', adminRoutes);
 
 // Global Status Check
@@ -84,7 +88,7 @@ app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
     security: "Military-Grade / Dual-Token + Fingerprinting Active",
-    version: "2026.1.2" 
+    version: "2026.1.3" 
   });
 });
 
@@ -93,9 +97,7 @@ app.get('/', (req, res) => {
  */
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
-  
   console.error(`[SERVER_ERROR]: ${err.message}`);
-
   res.status(statusCode).json({
     success: false,
     message: err.message,
@@ -109,5 +111,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 System Online: Port ${PORT}`);
-  console.log(`🔒 Security: Helmet, Rate-Limit, & Fingerprinting Active`);
+  console.log(`🔒 Security: Proxy-Trust, Sanitization, & Fingerprinting Active`);
 });
