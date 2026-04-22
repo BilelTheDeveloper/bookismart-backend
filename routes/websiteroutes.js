@@ -2,8 +2,8 @@ import express from 'express';
 import { 
   saveWebsite, 
   getMyWebsite 
-} from '../controllers/websitecontroller.js';
-import { protect } from '../middleware/authmiddleware.js';
+} from '../controllers/websiteController.js';
+import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
