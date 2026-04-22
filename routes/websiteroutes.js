@@ -1,9 +1,11 @@
 import express from 'express';
 import { 
   saveWebsite, 
-  getMyWebsite 
+  getMyWebsite,
+  uploadWebsiteImage // 🆕 Added for Cloudinary
 } from '../controllers/websiteController.js';
 import { protect } from '../middleware/authMiddleware.js';
+import upload from '../config/cloudinary.js'; // 🆕 Your Multer-Cloudinary config
 
 const router = express.Router();
 
@@ -21,5 +23,11 @@ router.get('/my-site', protect, getMyWebsite);
 // Purpose: Save the website builder progress or publish changes.
 // Security: [PROTECT] ensures the ID used to save is taken from the Secure Cookie.
 router.post('/save', protect, saveWebsite);
+
+// --- 3. IMAGE UPLOAD TO CLOUDINARY ---
+// Purpose: Securely upload an image and get a permanent URL back.
+// Security: [PROTECT] ensures only merchants can upload.
+// Logic: 'upload.single' uses the key 'image' from the frontend FormData.
+router.post('/upload', protect, upload.single('image'), uploadWebsiteImage);
 
 export default router;

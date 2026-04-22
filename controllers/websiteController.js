@@ -31,6 +31,29 @@ export const getMyWebsite = async (req, res) => {
 };
 
 /**
+ * @desc    Upload Image to Cloudinary (Handled by Multer Middleware)
+ * @route   POST /api/merchant/website/upload
+ * @access  Private (Professional Only)
+ */
+export const uploadWebsiteImage = async (req, res) => {
+  try {
+    // req.file is populated by your upload.single() or upload.array() middleware
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded or invalid file type." });
+    }
+
+    // Return the secure Cloudinary URL to the frontend
+    res.status(200).json({
+      url: req.file.path, // This is the permanent https:// link from Cloudinary
+      public_id: req.file.filename
+    });
+  } catch (error) {
+    console.error(`🚨 [IMAGE_UPLOAD_ERROR]: ${error.message}`);
+    res.status(500).json({ message: "Image processing failed." });
+  }
+};
+
+/**
  * @desc    Save/Update Website with Whitelist Validation
  * @route   POST /api/merchant/website/save
  * @access  Private (Professional Only)
@@ -41,11 +64,12 @@ export const saveWebsite = async (req, res) => {
 
     // 2. Security Check: Is the user account active?
     const user = await User.findById(ownerId);
-    if (user.accountStatus === 'suspended') {
+    if (!user || user.accountStatus === 'suspended') {
       return res.status(403).json({ message: "Action blocked: Account suspended." });
     }
 
     // 3. Data Whitelisting (Don't trust the req.body directly)
+    // At this stage, image URLs should already be permanent Cloudinary links
     const { 
       templateId, category, name, slug, 
       hero, about, services, gallery, 
@@ -53,7 +77,6 @@ export const saveWebsite = async (req, res) => {
     } = req.body;
 
     // 4. Advanced Slug Sanitization
-    // We force the slug to be lowercase and replace spaces/special chars with dashes
     const sanitizedSlug = slug 
       ? slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-') 
       : `${name.toLowerCase().replace(/\s+/g, '-')}-${ownerId.toString().slice(-4)}`;
@@ -101,7 +124,6 @@ export const saveWebsite = async (req, res) => {
   } catch (error) {
     console.error(`🚨 [WEBSITE_SAVE_ERROR]: ${error.message}`);
     
-    // Check for Mongoose Validation Errors (e.g., invalid enum for days)
     if (error.name === 'ValidationError') {
       return res.status(400).json({ 
         message: "Data validation failed", 
