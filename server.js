@@ -11,6 +11,7 @@ import connectDB from './config/db.js';
 import { fingerprinter } from './middleware/fingerprint.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import websiteRoutes from './routes/websiteroutes.js'; // 🆕 Added Website Routes
 
 // Load environment variables
 dotenv.config();
@@ -85,6 +86,7 @@ app.use(fingerprinter);
  */
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/merchant/website', websiteRoutes); // 🆕 Mounted Website Routes
 
 // Global Status Check
 app.get('/', (req, res) => {
