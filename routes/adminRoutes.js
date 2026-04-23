@@ -10,7 +10,7 @@ import {
 import {
   getPendingWebsites,
   reviewWebsiteDeployment
-} from '../controllers/adminWebsiteController.js'; // The controller we just built
+} from '../controllers/adminwebsitecontroller.js'; // The controller we just built
 
 // Middlewares
 import { protect } from '../middleware/authMiddleware.js';
