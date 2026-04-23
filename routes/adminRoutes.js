@@ -7,6 +7,11 @@ import {
   getPendingVerifications 
 } from '../controllers/userVerificationController.js';
 
+import {
+  getPendingWebsites,
+  reviewWebsiteDeployment
+} from '../controllers/adminWebsiteController.js'; // The controller we just built
+
 // Middlewares
 import { protect } from '../middleware/authMiddleware.js';
 import { adminGuard } from '../middleware/adminGuard.js';
@@ -24,7 +29,7 @@ router.use(protect);
 router.use(adminGuard);
 
 /**
- * --- ADMIN ACTION MODULE ---
+ * --- 🛡️ MODULE 1: USER IDENTITY (KYC) ---
  */
 
 // @desc    Fetch all users waiting for KYC approval
@@ -34,5 +39,17 @@ router.get('/verifications/pending', getPendingVerifications);
 // @desc    Approve or Reject a user's identity documents
 // @route   PATCH /api/admin/verifications/review/:id
 router.patch('/verifications/review/:id', reviewUserIdentity);
+
+/**
+ * --- 🌐 MODULE 2: WEBSITE DEPLOYMENT ---
+ */
+
+// @desc    Fetch all merchant websites awaiting review
+// @route   GET /api/admin/websites/pending
+router.get('/websites/pending', getPendingWebsites);
+
+// @desc    Approve/Publish or Reject/Edit a merchant's website
+// @route   PATCH /api/admin/websites/verify/:id
+router.patch('/websites/verify/:id', reviewWebsiteDeployment);
 
 export default router;
