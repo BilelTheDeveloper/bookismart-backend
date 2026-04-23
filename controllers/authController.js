@@ -22,7 +22,7 @@ export const sendOTP = async (req, res) => {
 
     console.log(`
     ╔════════════════════════════════════════════════════════════╗
-    ║          🔥 BOOKIIFY DEVELOPMENT VAULT 🔥              ║
+    ║        🔥 BOOKIIFY DEVELOPMENT VAULT 🔥              ║
     ╠════════════════════════════════════════════════════════════╣
     ║  TYPE:   ${type.toUpperCase().padEnd(49)} ║
     ║  TARGET: ${target.padEnd(49)} ║
@@ -130,27 +130,20 @@ export const login = async (req, res) => {
     user.lastLogin = Date.now();
     await user.save();
 
-    /**
-     * 🛡️ COOKIE SECURITY SETTINGS
-     * We attach BOTH the Access Token and Refresh Token as HttpOnly cookies.
-     */
     const cookieOptions = {
       httpOnly: true,
       secure: true, 
-      sameSite: 'none', // Required for cross-domain (Vercel/Render)
+      sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     };
 
-    // 1. Hand over the Access Token key
     res.cookie('accessToken', accessToken, { 
       ...cookieOptions, 
-      maxAge: 15 * 60 * 1000 // Access token lasts 15 mins
+      maxAge: 15 * 60 * 1000 
     });
 
-    // 2. Hand over the Refresh Token key
     res.cookie('refreshToken', refreshToken, cookieOptions);
 
-    // 3. Return only the User Profile (No Tokens in Body!)
     res.json({
       message: "Authentication successful",
       user: {
@@ -159,7 +152,6 @@ export const login = async (req, res) => {
         role: user.role,
         businessName: user.businessName,
         category: user.category,
-       
       }
     });
   } catch (err) {
@@ -243,4 +235,35 @@ export const logout = async (req, res) => {
   res.clearCookie('accessToken', { httpOnly: true, secure: true, sameSite: 'none' });
   res.clearCookie('refreshToken', { httpOnly: true, secure: true, sameSite: 'none' });
   res.status(200).json({ message: "Logged out successfully" });
+};
+
+/**
+ * 🛡️ ULTRA-SECURE VERIFICATION ENDPOINT
+ * @desc    Get real-time user data from DB using secure cookie
+ * @route   GET /api/auth/verify-me
+ * @access  Private
+ */
+export const verifyMe = async (req, res) => {
+  try {
+    // req.user is attached by the 'protect' middleware
+    const user = await User.findById(req.user._id).select('-password -refreshTokens');
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role, // Truth from DB
+        accountStatus: user.accountStatus,
+        businessName: user.businessName
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Verification failed", error: err.message });
+  }
 };
