@@ -12,6 +12,7 @@ import { fingerprinter } from './middleware/fingerprint.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js'; // 🆕 Added Website Routes
+import publicRoutes from './routes/publicRoutes.js'; // 🌐 New Public Discovery Routes
 
 // Load environment variables
 dotenv.config();
@@ -84,6 +85,7 @@ app.use(fingerprinter);
 /**
  * 3. ROUTE DEFINITIONS
  */
+app.use('/api/public', publicRoutes); // 🌐 Public Discovery (Mounted first so it's clean)
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/merchant/website', websiteRoutes); // 🆕 Mounted Website Routes
