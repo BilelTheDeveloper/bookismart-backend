@@ -2,23 +2,19 @@ import crypto from 'crypto';
 
 /**
  * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING (Ultra-Secured)
- * * This is the "Identity Lock". It bridges the Frontend UUID with 
- * Backend Hardware Anchors to ensure the session cannot be hijacked
- * even if the cookie is stolen.
+ * Purpose: Bridges Frontend UUID with Backend Hardware Anchors.
  */
 export const fingerprinter = (req, res, next) => {
   try {
     // 1. PRIMARY: Extract the UUID from the Axios Interceptor
-    // This is our high-reliability source.
     const clientHeaderFingerprint = req.headers['x-device-fingerprint'];
 
     // 2. SECONDARY: Hardware/Network Anchor
-    // We split 'x-forwarded-for' to get the REAL user IP behind Render/Cloudflare.
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0';
     const realIp = rawIp.split(',')[0].trim();
     const userAgent = req.headers['user-agent'] || 'unknown_agent';
     
-    // We create a server-side hash of the environment
+    // Create a server-side hash of the environment
     const hardwareAnchor = crypto
       .createHash('sha256') 
       .update(`${realIp}-${userAgent}`)
@@ -26,19 +22,32 @@ export const fingerprinter = (req, res, next) => {
 
     /**
      * 🛡️ THE SECURITY BINDING LOGIC
-     * * If the client sends a UUID, we use it as the primary ID.
-     * We attach the hardware anchor as a 'Security Shadow' to detect 
-     * if that UUID suddenly jumps to a different IP or Browser.
+     * We use Object.defineProperty to attach these securely.
+     * This prevents 'express-mongo-sanitize' from trying to "clean" these 
+     * properties, which is what causes the 500 "Getter" error.
      */
+    let finalFingerprint;
+
     if (clientHeaderFingerprint && clientHeaderFingerprint !== 'null' && clientHeaderFingerprint !== 'undefined') {
-      req.deviceFingerprint = clientHeaderFingerprint;
+      finalFingerprint = clientHeaderFingerprint;
     } else {
-      // Fallback to hardware hash if the frontend hasn't initialized the UUID yet
-      req.deviceFingerprint = hardwareAnchor;
+      finalFingerprint = hardwareAnchor;
     }
 
-    // 3. Attach for downstream Audit (used by protect middleware)
-    req.fingerprintAnchor = hardwareAnchor;
+    // 🛡️ SECURE ATTACHMENT: Non-enumerable properties are invisible to sanitizers
+    Object.defineProperty(req, 'deviceFingerprint', {
+      value: finalFingerprint,
+      writable: true,
+      enumerable: false, // 👈 THE FIX: Sanitizers won't trip over this
+      configurable: true
+    });
+
+    Object.defineProperty(req, 'fingerprintAnchor', {
+      value: hardwareAnchor,
+      writable: true,
+      enumerable: false, // 👈 THE FIX: Sanitizers won't trip over this
+      configurable: true
+    });
 
     // Log the first 10 chars for debugging in Render
     console.log(`[Security Hub] Identity Locked: ${req.deviceFingerprint.substring(0, 10)}...`);
@@ -46,7 +55,8 @@ export const fingerprinter = (req, res, next) => {
     next();
   } catch (error) {
     console.error("🚨 [SECURITY_CRITICAL]: FINGERPRINT_ENGINE_FAILURE", error);
-    // FAIL CLOSED: Do not allow an empty fingerprint
+    
+    // FAIL CLOSED: Securely reject the state
     req.deviceFingerprint = 'REJECTED_BY_VAULT';
     next();
   }
