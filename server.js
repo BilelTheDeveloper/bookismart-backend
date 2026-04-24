@@ -4,7 +4,6 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import mongoSanitize from 'express-mongo-sanitize';
 import connectDB from './config/db.js';
 
 // 🚀 REDIS SECURITY ENGINE
@@ -26,53 +25,61 @@ const app = express();
 
 /**
  * 🛡️ RENDER PROXY TRUST
- * Vital for Render's architecture to handle IP-based rate limiting.
  */
 app.set('trust proxy', 1);
 
 /**
  * 2. POWER SECURITY HARDENING & CORS
  */
-
-// 🛡️ HELMET: Sets secure HTTP headers (HSTS, CSP, etc.)
 app.use(helmet());
 
-// 🛡️ CORS: THE TRIPLE-LOCK CONFIGURATION
 app.use(cors({
   origin: [
     "https://bookiify.vercel.app", 
     "http://localhost:5173",
     process.env.CLIENT_URL 
   ].filter(Boolean), 
-  credentials: true, // Allows HttpOnly cookies to pass through
+  credentials: true, 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
-    'x-device-fingerprint', // 🛡️ Explicitly allowed for our identity engine
+    'x-device-fingerprint', 
     'Accept'
   ]
 }));
 
-// 🛡️ DATA PARSING (Foundation for all identity checks)
+// 🛡️ DATA PARSING
 app.use(express.json({ limit: '10mb' })); 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cookieParser()); // 🚨 Required BEFORE security logic
 
 /**
- * 🛡️ NO-SQL INJECTION PROTECTION (Enterprise Fix)
- * FIXED: This must run IMMEDIATELY after parsing and BEFORE the fingerprinter.
- * This prevents the "Cannot set property query of #<IncomingMessage>" error.
+ * 🛡️ CUSTOM ENTERPRISE SANITIZER (The Fix)
+ * This manually scrubs $ and . from keys without triggering the 
+ * "IncomingMessage getter" 500 error found in the mongo-sanitize library.
  */
-app.use(mongoSanitize({
-  replaceWith: '_',
-  allowDots: true,
-}));
+app.use((req, res, next) => {
+  const sanitize = (obj) => {
+    if (obj instanceof Object) {
+      for (const key in obj) {
+        if (key.startsWith('$') || key.includes('.')) {
+          const newKey = key.replace(/\$/g, '_').replace(/\./g, '_');
+          obj[newKey] = obj[key];
+          delete obj[key];
+        }
+        if (obj[newKey] instanceof Object) sanitize(obj[newKey]);
+        else if (obj[key] instanceof Object) sanitize(obj[key]);
+      }
+    }
+  };
+  if (req.body) sanitize(req.body);
+  if (req.query) sanitize(req.query);
+  if (req.params) sanitize(req.params);
+  next();
+});
 
-/**
- * 🛡️ THE FINGERPRINT GATE
- * Now runs on sanitized data to lock the identity securely.
- */
+// 🛡️ COOKIES & IDENTITY
+app.use(cookieParser()); 
 app.use(fingerprinter);
 
 // 🛡️ GLOBAL RATE LIMITING
@@ -93,11 +100,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/merchant/website', websiteRoutes); 
 
-// Global Status Check (Vitals)
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
-    security: "Enterprise-Grade / Redis + Fingerprinting v2.1",
+    security: "Enterprise-Grade / Redis + Fingerprinting v2.2",
     timestamp: new Date().toISOString()
   });
 });
