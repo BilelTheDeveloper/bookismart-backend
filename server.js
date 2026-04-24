@@ -49,7 +49,7 @@ app.use(cors({
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
-    'x-device-fingerprint', // 🛡️ Explicitly allowed for our new engine
+    'x-device-fingerprint', // 🛡️ Explicitly allowed for our identity engine
     'Accept'
   ]
 }));
@@ -57,22 +57,24 @@ app.use(cors({
 // 🛡️ DATA PARSING (Foundation for all identity checks)
 app.use(express.json({ limit: '10mb' })); 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cookieParser()); // 🚨 Required before fingerprinting
+app.use(cookieParser()); // 🚨 Required BEFORE fingerprinter
 
 /**
  * 🛡️ THE FINGERPRINT GATE
- * CRITICAL UPDATE: Moved up to lock the identity before sanitization 
- * and rate limiting. This fixes the mismatch loop.
+ * Locks the identity using the UUID/Hardware combo before any other logic.
  */
 app.use(fingerprinter);
 
 /**
- * 🛡️ NO-SQL INJECTION PROTECTION
- * Optimized to run after identity is established.
+ * 🛡️ NO-SQL INJECTION PROTECTION (Enterprise Fix)
+ * Added replaceWith to prevent the "Cannot set property query of #<IncomingMessage>" 500 error.
  */
-app.use(mongoSanitize());
+app.use(mongoSanitize({
+  replaceWith: '_',
+  allowDots: true,
+}));
 
-// 🛡️ RATE LIMITING (Now protected against IP spoofing)
+// 🛡️ GLOBAL RATE LIMITING
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 100, 
@@ -94,7 +96,7 @@ app.use('/api/merchant/website', websiteRoutes);
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
-    security: "Enterprise-Grade / Redis + Fingerprinting v2",
+    security: "Enterprise-Grade / Redis + Fingerprinting v2.1",
     timestamp: new Date().toISOString()
   });
 });
@@ -109,7 +111,6 @@ app.use((err, req, res, next) => {
   res.status(statusCode).json({
     success: false,
     message: err.message,
-    // Hide stack traces in production
     stack: process.env.NODE_ENV === 'production' ? "🛡️ Protected" : err.stack,
   });
 });

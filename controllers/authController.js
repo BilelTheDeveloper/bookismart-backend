@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { 
   generateAccessAndRefreshTokens 
 } from '../utils/tokenService.js';
-import { revokeToken } from '../middleware/authMiddleware.js'; // 🛡️ Import the revoker
+import { revokeToken } from '../middleware/authMiddleware.js'; 
 import { validateSignup } from '../validators/authValidator.js';
 import crypto from 'crypto';
 
@@ -23,7 +23,7 @@ export const sendOTP = async (req, res) => {
 
     console.log(`
     ╔════════════════════════════════════════════════════════════╗
-    ║         🔥 BOOKIIFY DEVELOPMENT VAULT 🔥               ║
+    ║          🔥 BOOKIIFY DEVELOPMENT VAULT 🔥                 ║
     ╠════════════════════════════════════════════════════════════╣
     ║  TYPE:   ${type.toUpperCase().padEnd(49)} ║
     ║  TARGET: ${target.padEnd(49)} ║
@@ -100,7 +100,7 @@ export const register = async (req, res) => {
 };
 
 /**
- * @desc    Login with Triple-Lock Cookie Protection & Redis Session ID
+ * @desc    Login with Triple-Lock Cookie Protection & Fingerprint Binding
  */
 export const login = async (req, res) => {
   const { email, password } = req.body;
@@ -109,7 +109,7 @@ export const login = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
-    // Strict Status Check
+    // 🛡️ REJECTION GATE: Block suspended users immediately
     if (user.accountStatus === 'suspended') {
       return res.status(403).json({ message: "Account suspended. Contact support." });
     }
@@ -117,18 +117,17 @@ export const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
 
-    // Use the fingerprint from the request
+    // 🛡️ IDENTITY GATE: Use our fixed fingerprint
     const deviceId = req.deviceFingerprint; 
     
-    // 🛡️ generateAccessAndRefreshTokens now returns the jti/accessTokenId
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
 
-    // Filter old tokens for this device and update
+    // Clean up old sessions for this specific device
     user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
     user.refreshTokens.push({
       token: refreshToken,
       deviceId,
-      lastKnownIp: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      lastKnownIp: req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress,
       expiresAt: refreshTokenExpiresAt
     });
 
@@ -141,17 +140,8 @@ export const login = async (req, res) => {
       sameSite: 'none',
     };
 
-    // Access Token Cookie (15m)
-    res.cookie('accessToken', accessToken, { 
-      ...cookieOptions, 
-      maxAge: 15 * 60 * 1000 
-    });
-
-    // Refresh Token Cookie (7d)
-    res.cookie('refreshToken', refreshToken, {
-        ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
+    res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
 
     res.json({
       message: "Authentication successful",
@@ -170,7 +160,7 @@ export const login = async (req, res) => {
 };
 
 /**
- * @desc    Refresh Access Token: Implements Rotation
+ * @desc    Refresh Access Token: Implements Rotation & Status Check
  */
 export const refresh = async (req, res) => {
   const incomingRefreshToken = req.cookies.refreshToken;
@@ -179,25 +169,22 @@ export const refresh = async (req, res) => {
   try {
     const user = await User.findOne({ "refreshTokens.token": incomingRefreshToken });
     
-    if (!user) {
-        res.clearCookie('refreshToken');
-        res.clearCookie('accessToken');
-        return res.status(403).json({ message: "Security Alert: Invalid Session" });
+    // 🛡️ SECURITY SHUTDOWN: If user is suspended, kill tokens during refresh
+    if (!user || user.accountStatus === 'suspended') {
+        res.clearCookie('refreshToken', { httpOnly: true, secure: true, sameSite: 'none' });
+        res.clearCookie('accessToken', { httpOnly: true, secure: true, sameSite: 'none' });
+        return res.status(403).json({ message: "Security Alert: Access Revoked" });
     }
 
     const deviceId = req.deviceFingerprint; 
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
 
-    // Token Rotation: Delete used token, add new one
+    // Token Rotation (Prevents Replay Attacks)
     user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== incomingRefreshToken);
     user.refreshTokens.push({ token: refreshToken, deviceId, expiresAt: refreshTokenExpiresAt });
     await user.save();
 
-    const cookieOptions = {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none'
-    };
+    const cookieOptions = { httpOnly: true, secure: true, sameSite: 'none' };
 
     res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
     res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
@@ -215,12 +202,10 @@ export const logout = async (req, res) => {
   try {
     const token = req.cookies.accessToken;
 
-    // 🛡️ Kill the token in Redis so it can't be used again
     if (token) {
       await revokeToken(token);
     }
 
-    // Remove Refresh Token from DB if it exists
     const refreshToken = req.cookies.refreshToken;
     if (refreshToken) {
         await User.updateOne(
@@ -229,8 +214,9 @@ export const logout = async (req, res) => {
         );
     }
 
-    res.clearCookie('accessToken', { httpOnly: true, secure: true, sameSite: 'none' });
-    res.clearCookie('refreshToken', { httpOnly: true, secure: true, sameSite: 'none' });
+    const cookieOptions = { httpOnly: true, secure: true, sameSite: 'none' };
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
 
     res.status(200).json({ message: "Securely logged out" });
   } catch (err) {
@@ -243,7 +229,6 @@ export const logout = async (req, res) => {
  */
 export const verifyMe = async (req, res) => {
   try {
-    // req.user comes from 'protect' middleware after DB check
     const user = await User.findById(req.user._id).select('-password -refreshTokens');
 
     if (!user) return res.status(404).json({ message: "User not found" });

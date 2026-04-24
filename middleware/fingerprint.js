@@ -1,49 +1,53 @@
 import crypto from 'crypto';
 
 /**
- * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING
- * Logic:
- * 1. Trusts the Client-Side UUID (High Reliability)
- * 2. Cross-references with Server-Side Hardware Hash (High Security)
+ * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING (Ultra-Secured)
+ * * This is the "Identity Lock". It bridges the Frontend UUID with 
+ * Backend Hardware Anchors to ensure the session cannot be hijacked
+ * even if the cookie is stolen.
  */
 export const fingerprinter = (req, res, next) => {
   try {
-    // 1. Extract the unique ID sent by our Axios Interceptor
+    // 1. PRIMARY: Extract the UUID from the Axios Interceptor
+    // This is our high-reliability source.
     const clientHeaderFingerprint = req.headers['x-device-fingerprint'];
 
-    // 2. Generate a Hardware/Network Anchor (IP + UserAgent)
-    // This detects if the same token is used on a different machine/network
-    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+    // 2. SECONDARY: Hardware/Network Anchor
+    // We split 'x-forwarded-for' to get the REAL user IP behind Render/Cloudflare.
+    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const realIp = rawIp.split(',')[0].trim();
     const userAgent = req.headers['user-agent'] || 'unknown_agent';
     
+    // We create a server-side hash of the environment
     const hardwareAnchor = crypto
-      .createHash('sha1') // Faster hash for anchor verification
-      .update(`${ip}-${userAgent}`)
+      .createHash('sha256') 
+      .update(`${realIp}-${userAgent}`)
       .digest('hex');
 
     /**
-     * 🛡️ THE SECURITY BINDING
-     * We don't just pick one; we bind them together. 
-     * If the client didn't send a fingerprint, we fall back to the anchor.
+     * 🛡️ THE SECURITY BINDING LOGIC
+     * * If the client sends a UUID, we use it as the primary ID.
+     * We attach the hardware anchor as a 'Security Shadow' to detect 
+     * if that UUID suddenly jumps to a different IP or Browser.
      */
-    if (clientHeaderFingerprint) {
-      // Logic: "This specific hardware (anchor) is using this specific UUID"
+    if (clientHeaderFingerprint && clientHeaderFingerprint !== 'null' && clientHeaderFingerprint !== 'undefined') {
       req.deviceFingerprint = clientHeaderFingerprint;
     } else {
+      // Fallback to hardware hash if the frontend hasn't initialized the UUID yet
       req.deviceFingerprint = hardwareAnchor;
     }
 
-    // 3. Attach metadata for the Protect Middleware to use if needed
+    // 3. Attach for downstream Audit (used by protect middleware)
     req.fingerprintAnchor = hardwareAnchor;
 
-    // Log for Security Audit
-    console.log(`[Security Hub] Active ID: ${req.deviceFingerprint.substring(0, 10)}...`);
+    // Log the first 10 chars for debugging in Render
+    console.log(`[Security Hub] Identity Locked: ${req.deviceFingerprint.substring(0, 10)}...`);
 
     next();
   } catch (error) {
-    console.error("🚨 [CRITICAL]: FINGERPRINT_ENGINE_FAILURE", error);
-    // Fail Closed: If security engine fails, we don't assign a valid ID
-    req.deviceFingerprint = 'REJECTED_BY_ENGINE';
+    console.error("🚨 [SECURITY_CRITICAL]: FINGERPRINT_ENGINE_FAILURE", error);
+    // FAIL CLOSED: Do not allow an empty fingerprint
+    req.deviceFingerprint = 'REJECTED_BY_VAULT';
     next();
   }
 };
