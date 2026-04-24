@@ -1,47 +1,44 @@
 import crypto from 'crypto';
+import { calculateServerAnchor } from '../utils/fingerprintHelper.js';
 
 /**
- * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING (Ultra-Secured)
+ * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING (Ultra-Secured - V2)
  * Purpose: Bridges Frontend UUID with Backend Hardware Anchors.
+ * FIX: Replaces "Client-Wins" logic with "Server-Anchor Binding".
  */
 export const fingerprinter = (req, res, next) => {
   try {
     // 1. PRIMARY: Extract the UUID from the Axios Interceptor
     const clientHeaderFingerprint = req.headers['x-device-fingerprint'];
 
-    // 2. SECONDARY: Hardware/Network Anchor
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0';
-    const realIp = rawIp.split(',')[0].trim();
-    const userAgent = req.headers['user-agent'] || 'unknown_agent';
-    
-    // Create a server-side hash of the environment
-    const hardwareAnchor = crypto
-      .createHash('sha256') 
-      .update(`${realIp}-${userAgent}`)
-      .digest('hex');
+    // 2. SERVER-SIDE ANCHOR: The Absolute Source of Truth
+    // Uses the unified utility (IP | UserAgent)
+    const hardwareAnchor = calculateServerAnchor(req);
 
     /**
      * 🛡️ THE SECURITY BINDING LOGIC
+     * FIX: We combine BOTH factors. 
+     * Even if an attacker steals the token and the header, 
+     * they cannot spoof the Hardware Anchor (IP/UA) easily.
+     */
+    const boundIdentity = `${hardwareAnchor}-${clientHeaderFingerprint || 'no_header'}`;
+
+    /**
+     * 🛡️ SECURE ATTACHMENT
      * We use Object.defineProperty to attach these securely.
      * This prevents 'express-mongo-sanitize' from trying to "clean" these 
-     * properties, which is what causes the 500 "Getter" error.
+     * properties, which causes the 500 "Getter" errors.
      */
-    let finalFingerprint;
-
-    if (clientHeaderFingerprint && clientHeaderFingerprint !== 'null' && clientHeaderFingerprint !== 'undefined') {
-      finalFingerprint = clientHeaderFingerprint;
-    } else {
-      finalFingerprint = hardwareAnchor;
-    }
-
-    // 🛡️ SECURE ATTACHMENT: Non-enumerable properties are invisible to sanitizers
+    
+    // The Final Combined Identity for Token Comparison
     Object.defineProperty(req, 'deviceFingerprint', {
-      value: finalFingerprint,
+      value: boundIdentity,
       writable: true,
       enumerable: false, // 👈 THE FIX: Sanitizers won't trip over this
       configurable: true
     });
 
+    // The Pure Hardware Hash (Useful for Breach Tracking)
     Object.defineProperty(req, 'fingerprintAnchor', {
       value: hardwareAnchor,
       writable: true,
@@ -50,14 +47,21 @@ export const fingerprinter = (req, res, next) => {
     });
 
     // Log the first 10 chars for debugging in Render
-    console.log(`[Security Hub] Identity Locked: ${req.deviceFingerprint.substring(0, 10)}...`);
+    console.log(`[Security Hub] Identity Locked: ${boundIdentity.substring(0, 10)}...`);
 
     next();
   } catch (error) {
     console.error("🚨 [SECURITY_CRITICAL]: FINGERPRINT_ENGINE_FAILURE", error);
     
-    // FAIL CLOSED: Securely reject the state
-    req.deviceFingerprint = 'REJECTED_BY_VAULT';
-    next();
+    /**
+     * 🛡️ FAIL CLOSED PROTOCOL
+     * FIX: We do NOT call next(). If the security engine fails, 
+     * the request must be terminated immediately with a 500 error.
+     */
+    return res.status(500).json({ 
+      success: false, 
+      code: 'VAULT_IDENTITY_CRASH',
+      message: "Security Identity System is currently unavailable." 
+    });
   }
 };

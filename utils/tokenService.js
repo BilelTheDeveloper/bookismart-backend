@@ -1,37 +1,49 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { calculateServerAnchor } from './fingerprintHelper.js';
 
 /**
- * TOKEN SERVICE - Advanced Security Hub (Enterprise Edition)
- * Implements: Dual-Token System, Device Fingerprinting, JTI Tracking, and HS256 Enforcement
+ * 🔒 TOKEN SERVICE - Advanced Security Hub (Enterprise Edition)
+ * Implements: Dual-Token System, Unified Device Binding, JTI Tracking, and HS256 Enforcement
  */
 
-export const generateAccessAndRefreshTokens = async (user, deviceFingerprint) => {
+/**
+ * @desc    Generates both Access and Refresh tokens with Unified Fingerprinting
+ * @param   {Object} user - The user document
+ * @param   {Object} req - The request object (required for server-side anchor calculation)
+ * @param   {String} clientHeader - The x-device-fingerprint from the frontend
+ */
+export const generateAccessAndRefreshTokens = async (user, req, clientHeader) => {
   try {
-    // 1. Create a Unique ID (jti) for this specific Access Token
+    // 1. Unified Identity Binding
+    // We calculate the same boundIdentity as the fingerprinter middleware
+    const serverAnchor = calculateServerAnchor(req);
+    const boundFingerprint = `${serverAnchor}-${clientHeader || 'no_header'}`;
+
+    // 2. Create a Unique ID (jti) for this specific Access Token
     // This allows the Redis blacklist to revoke this specific session.
     const accessTokenId = crypto.randomBytes(16).toString('hex');
 
-    // 2. Generate Access Token (Short-lived - 15 Minutes)
+    // 3. Generate Access Token (Short-lived - 15 Minutes)
     const accessToken = jwt.sign(
       { 
         id: user._id, 
         role: user.role,
-        fingerprint: deviceFingerprint, // Bind token to device
-        jti: accessTokenId              // 🚨 CRITICAL: Required for Redis Blacklist
+        fingerprint: boundFingerprint, // 🛡️ Bound to Hardware + Header
+        jti: accessTokenId             // 🚨 Required for Redis Blacklist
       },
       process.env.JWT_ACCESS_SECRET,
       { 
         expiresIn: '15m',
-        algorithm: 'HS256'              // 🛡️ Explicitly prevent algorithm confusion attacks
+        algorithm: 'HS256'              // 🛡️ Explicitly prevent algorithm confusion
       }
     );
 
-    // 3. Generate Refresh Token (Long-lived - 7 Days)
-    // We use a cryptographically strong random string for maximum security.
+    // 4. Generate Refresh Token (Long-lived - 7 Days)
+    // Cryptographically strong random string
     const refreshToken = crypto.randomBytes(40).toString('hex');
 
-    // 4. Set Expiration Date
+    // 5. Set Expiration Date
     const refreshTokenExpiresAt = new Date();
     refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 7);
 
@@ -39,36 +51,30 @@ export const generateAccessAndRefreshTokens = async (user, deviceFingerprint) =>
       accessToken,
       refreshToken,
       refreshTokenExpiresAt,
-      accessTokenId // We return this in case the controller needs to log it
+      accessTokenId 
     };
   } catch (error) {
-    console.error("Token Generation Error:", error);
-    throw new Error("Could not generate security tokens");
+    console.error("🚨 [TOKEN_SERVICE_ERROR]:", error);
+    throw new Error("Could not generate secure session tokens");
   }
 };
 
 /**
- * Hashes the user-agent and IP to create a unique device ID
- * Helps detect if a token is stolen and used on a different machine
+ * 🛡️ THE BINDING VALIDATOR
+ * Replaces the old createDeviceFingerprint to match the new architecture
  */
-export const createDeviceFingerprint = (req) => {
-  const userAgent = req.headers['user-agent'] || 'unknown';
-  const ip = req.ip || req.connection.remoteAddress;
-  
-  return crypto
-    .createHash('sha256')
-    .update(userAgent + ip)
-    .digest('hex');
+export const getBoundIdentity = (req, clientHeader) => {
+  const serverAnchor = calculateServerAnchor(req);
+  return `${serverAnchor}-${clientHeader || 'no_header'}`;
 };
 
 /**
- * Validates the Access Token
- * Updated to match the "protect" middleware algorithm requirements
+ * @desc    Validates the Access Token
  */
 export const verifyAccessToken = (token) => {
   try {
     return jwt.verify(token, process.env.JWT_ACCESS_SECRET, {
-      algorithms: ['HS256'] // 🛡️ Only accept HS256
+      algorithms: ['HS256'] 
     });
   } catch (error) {
     return null;

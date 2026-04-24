@@ -101,7 +101,8 @@ export const register = async (req, res) => {
 };
 
 /**
- * @desc    Login with Triple-Lock Cookie Protection & Fingerprint Binding
+ * @desc    Login with Triple-Lock Cookie Protection & Unified Identity Binding
+ * FIX: Pass req and deviceId to token service for combined hashing
  */
 export const login = async (req, res) => {
   const { email, password } = req.body;
@@ -117,14 +118,15 @@ export const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-    // 🛡️ IDENTITY GATE SYNC: Robust lookup for non-enumerable fingerprints
-    const deviceId = req.deviceFingerprint || req.headers['x-device-fingerprint']; 
+    // 🛡️ IDENTITY GATE SYNC: Use client header for initial binding
+    const deviceId = req.headers['x-device-fingerprint']; 
 
     if (!deviceId) {
        return res.status(400).json({ success: false, message: "Security Binding Error: Missing Device Identity" });
     }
     
-    const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
+    // THE UPDATE: Passing req ensures the Server-Side Anchor is combined with the Header
+    const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
 
     user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
     user.refreshTokens.push({
@@ -164,7 +166,7 @@ export const login = async (req, res) => {
 };
 
 /**
- * @desc    Refresh Access Token: Implements Rotation & Status Check
+ * @desc    Refresh Access Token: Implements Rotation & Unified Binding
  */
 export const refresh = async (req, res) => {
   const incomingRefreshToken = req.cookies.refreshToken;
@@ -180,9 +182,11 @@ export const refresh = async (req, res) => {
         return res.status(403).json({ success: false, message: "Security Alert: Access Revoked" });
     }
 
-    // 🛡️ IDENTITY GATE SYNC: Ensure rotation respects the fingerprint
-    const deviceId = req.deviceFingerprint || req.headers['x-device-fingerprint']; 
-    const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
+    // 🛡️ IDENTITY GATE SYNC: Ensure rotation respects the hardware anchor
+    const deviceId = req.headers['x-device-fingerprint']; 
+    
+    // THE UPDATE: Passing req ensures the Server-Side Anchor is combined with the Header
+    const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
 
     user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== incomingRefreshToken);
     user.refreshTokens.push({ token: refreshToken, deviceId, expiresAt: refreshTokenExpiresAt });
@@ -233,6 +237,7 @@ export const logout = async (req, res) => {
  */
 export const verifyMe = async (req, res) => {
   try {
+    // 🛡️ PERFORMANCE UPDATE: req.user is already populated by protect middleware
     const user = await User.findById(req.user._id).select('-password -refreshTokens');
 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
