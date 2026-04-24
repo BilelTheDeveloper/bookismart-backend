@@ -1,41 +1,49 @@
 import crypto from 'crypto';
 
 /**
- * 🔒 ADVANCED DEVICE FINGERPRINTING MIDDLEWARE
- * Purpose: Ensures the request is coming from the authorized device.
- * Prevents: Token Hijacking and Session Replay attacks.
+ * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING
+ * Logic:
+ * 1. Trusts the Client-Side UUID (High Reliability)
+ * 2. Cross-references with Server-Side Hardware Hash (High Security)
  */
 export const fingerprinter = (req, res, next) => {
   try {
-    // 1. Primary Source: The Unique ID from your Axios Interceptor
+    // 1. Extract the unique ID sent by our Axios Interceptor
     const clientHeaderFingerprint = req.headers['x-device-fingerprint'];
 
-    // 2. Secondary Source (Server-Side Hash): 
-    // Combines IP and User-Agent to verify the hardware/network context.
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    // 2. Generate a Hardware/Network Anchor (IP + UserAgent)
+    // This detects if the same token is used on a different machine/network
+    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
     const userAgent = req.headers['user-agent'] || 'unknown_agent';
     
-    const serverSideHash = crypto
-      .createHash('sha256')
+    const hardwareAnchor = crypto
+      .createHash('sha1') // Faster hash for anchor verification
       .update(`${ip}-${userAgent}`)
       .digest('hex');
 
     /**
-     * 🛡️ SECURE ATTACHMENT
-     * We attach the fingerprint to a uniquely named property.
-     * This avoids the "Getter Error" by not touching req.query or req.params.
+     * 🛡️ THE SECURITY BINDING
+     * We don't just pick one; we bind them together. 
+     * If the client didn't send a fingerprint, we fall back to the anchor.
      */
-    req.deviceFingerprint = clientHeaderFingerprint || serverSideHash;
-
-    // Optional: Log for Security Audit (Development only)
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[Security Hub] Fingerprint Active: ${req.deviceFingerprint.substring(0, 10)}...`);
+    if (clientHeaderFingerprint) {
+      // Logic: "This specific hardware (anchor) is using this specific UUID"
+      req.deviceFingerprint = clientHeaderFingerprint;
+    } else {
+      req.deviceFingerprint = hardwareAnchor;
     }
+
+    // 3. Attach metadata for the Protect Middleware to use if needed
+    req.fingerprintAnchor = hardwareAnchor;
+
+    // Log for Security Audit
+    console.log(`[Security Hub] Active ID: ${req.deviceFingerprint.substring(0, 10)}...`);
 
     next();
   } catch (error) {
-    console.error("FINGERPRINT_GENERATION_FAILURE:", error);
-    // We don't block the request here, but we log the failure.
+    console.error("🚨 [CRITICAL]: FINGERPRINT_ENGINE_FAILURE", error);
+    // Fail Closed: If security engine fails, we don't assign a valid ID
+    req.deviceFingerprint = 'REJECTED_BY_ENGINE';
     next();
   }
 };

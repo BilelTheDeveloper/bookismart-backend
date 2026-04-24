@@ -1,4 +1,4 @@
-import 'dotenv/config'; // 🚨 MUST BE FIRST: Loads .env variables before anything else
+import 'dotenv/config'; // 🚨 MUST BE FIRST: Loads .env variables
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -8,7 +8,7 @@ import mongoSanitize from 'express-mongo-sanitize';
 import connectDB from './config/db.js';
 
 // 🚀 REDIS SECURITY ENGINE
-import './config/redis.js'; // 🆕 Initialize Redis connection early
+import './config/redis.js'; // Initialize Redis connection early
 
 // Middlewares & Routes
 import { fingerprinter } from './middleware/fingerprint.js';
@@ -26,8 +26,7 @@ const app = express();
 
 /**
  * 🛡️ RENDER PROXY TRUST
- * Required for express-rate-limit and secure cookie "Secure" flag 
- * to function correctly behind a proxy like Render.
+ * Vital for Render's architecture to handle IP-based rate limiting.
  */
 app.set('trust proxy', 1);
 
@@ -35,7 +34,7 @@ app.set('trust proxy', 1);
  * 2. POWER SECURITY HARDENING & CORS
  */
 
-// 🛡️ HELMET: Protects HTTP headers
+// 🛡️ HELMET: Sets secure HTTP headers (HSTS, CSP, etc.)
 app.use(helmet());
 
 // 🛡️ CORS: THE TRIPLE-LOCK CONFIGURATION
@@ -45,17 +44,35 @@ app.use(cors({
     "http://localhost:5173",
     process.env.CLIENT_URL 
   ].filter(Boolean), 
-  credentials: true, // 🚨 CRITICAL: Allows browser to send/receive HttpOnly cookies
+  credentials: true, // Allows HttpOnly cookies to pass through
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
-    'x-device-fingerprint', 
+    'x-device-fingerprint', // 🛡️ Explicitly allowed for our new engine
     'Accept'
   ]
 }));
 
-// 🛡️ RATE LIMITING
+// 🛡️ DATA PARSING (Foundation for all identity checks)
+app.use(express.json({ limit: '10mb' })); 
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser()); // 🚨 Required before fingerprinting
+
+/**
+ * 🛡️ THE FINGERPRINT GATE
+ * CRITICAL UPDATE: Moved up to lock the identity before sanitization 
+ * and rate limiting. This fixes the mismatch loop.
+ */
+app.use(fingerprinter);
+
+/**
+ * 🛡️ NO-SQL INJECTION PROTECTION
+ * Optimized to run after identity is established.
+ */
+app.use(mongoSanitize());
+
+// 🛡️ RATE LIMITING (Now protected against IP spoofing)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 100, 
@@ -65,23 +82,6 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// 🛡️ DATA PARSING
-app.use(express.json({ limit: '10mb' })); 
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cookieParser()); // 🚨 CRITICAL: Allows Express to read req.cookies
-
-/**
- * 🛡️ NO-SQL INJECTION PROTECTION
- */
-app.use((req, res, next) => {
-  if (req.body) req.body = mongoSanitize.sanitize(req.body);
-  if (req.params) req.params = mongoSanitize.sanitize(req.params);
-  next();
-});
-
-// 🛡️ FINGERPRINTING
-app.use(fingerprinter);
-
 /**
  * 3. ROUTE DEFINITIONS
  */
@@ -90,12 +90,12 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/merchant/website', websiteRoutes); 
 
-// Global Status Check
+// Global Status Check (Vitals)
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
-    security: "Enterprise-Grade / Redis + HttpOnly Cookies + Fingerprinting",
-    version: "2026.1.5" 
+    security: "Enterprise-Grade / Redis + Fingerprinting v2",
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -105,9 +105,11 @@ app.get('/', (req, res) => {
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   console.error(`[SERVER_ERROR]: ${err.message}`);
+  
   res.status(statusCode).json({
     success: false,
     message: err.message,
+    // Hide stack traces in production
     stack: process.env.NODE_ENV === 'production' ? "🛡️ Protected" : err.stack,
   });
 });
@@ -119,4 +121,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 System Online: Port ${PORT}`);
   console.log(`🔒 Security: Enterprise Redis Blacklist Active`);
+  console.log(`📡 Identity: Device Fingerprinting Gateway Live`);
 });
