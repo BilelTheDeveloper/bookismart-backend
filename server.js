@@ -1,5 +1,5 @@
+import 'dotenv/config'; // 🚨 MUST BE FIRST: Loads .env variables before anything else
 import express from 'express';
-import dotenv from 'dotenv';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -7,15 +7,15 @@ import rateLimit from 'express-rate-limit';
 import mongoSanitize from 'express-mongo-sanitize';
 import connectDB from './config/db.js';
 
+// 🚀 REDIS SECURITY ENGINE
+import './config/redis.js'; // 🆕 Initialize Redis connection early
+
 // Middlewares & Routes
 import { fingerprinter } from './middleware/fingerprint.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
-import websiteRoutes from './routes/websiteroutes.js'; // 🆕 Added Website Routes
-import publicRoutes from './routes/publicRoutes.js'; // 🌐 New Public Discovery Routes
-
-// Load environment variables
-dotenv.config();
+import websiteRoutes from './routes/websiteroutes.js'; 
+import publicRoutes from './routes/publicRoutes.js'; 
 
 /**
  * 1. DATABASE CONNECTION
@@ -85,17 +85,17 @@ app.use(fingerprinter);
 /**
  * 3. ROUTE DEFINITIONS
  */
-app.use('/api/public', publicRoutes); // 🌐 Public Discovery (Mounted first so it's clean)
+app.use('/api/public', publicRoutes); 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/merchant/website', websiteRoutes); // 🆕 Mounted Website Routes
+app.use('/api/merchant/website', websiteRoutes); 
 
 // Global Status Check
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
-    security: "Military-Grade / HttpOnly Cookies + Fingerprinting Active",
-    version: "2026.1.4" 
+    security: "Enterprise-Grade / Redis + HttpOnly Cookies + Fingerprinting",
+    version: "2026.1.5" 
   });
 });
 
@@ -118,5 +118,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 System Online: Port ${PORT}`);
-  console.log(`🔒 Security: HttpOnly Cookies, Proxy-Trust, & Fingerprinting Active`);
+  console.log(`🔒 Security: Enterprise Redis Blacklist Active`);
 });

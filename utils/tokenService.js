@@ -2,37 +2,44 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
 /**
- * TOKEN SERVICE - Advanced Security Hub
- * Implements: Dual-Token System, Device Fingerprinting, and Rotation
+ * TOKEN SERVICE - Advanced Security Hub (Enterprise Edition)
+ * Implements: Dual-Token System, Device Fingerprinting, JTI Tracking, and HS256 Enforcement
  */
 
 export const generateAccessAndRefreshTokens = async (user, deviceFingerprint) => {
   try {
-    // 1. Generate Access Token (Short-lived - 15 Minutes)
-    // Only contains essential data to keep the payload light
+    // 1. Create a Unique ID (jti) for this specific Access Token
+    // This allows the Redis blacklist to revoke this specific session.
+    const accessTokenId = crypto.randomBytes(16).toString('hex');
+
+    // 2. Generate Access Token (Short-lived - 15 Minutes)
     const accessToken = jwt.sign(
       { 
         id: user._id, 
         role: user.role,
-        fingerprint: deviceFingerprint // Bind token to device
+        fingerprint: deviceFingerprint, // Bind token to device
+        jti: accessTokenId              // 🚨 CRITICAL: Required for Redis Blacklist
       },
       process.env.JWT_ACCESS_SECRET,
-      { expiresIn: '15m' }
+      { 
+        expiresIn: '15m',
+        algorithm: 'HS256'              // 🛡️ Explicitly prevent algorithm confusion attacks
+      }
     );
 
-    // 2. Generate Refresh Token (Long-lived - 7 Days)
-    // We use a cryptographically strong random string instead of a JWT 
-    // to prevent JWT-specific attacks on the long-lived token
+    // 3. Generate Refresh Token (Long-lived - 7 Days)
+    // We use a cryptographically strong random string for maximum security.
     const refreshToken = crypto.randomBytes(40).toString('hex');
 
-    // 3. Set Expiration Date
+    // 4. Set Expiration Date
     const refreshTokenExpiresAt = new Date();
     refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 7);
 
     return {
       accessToken,
       refreshToken,
-      refreshTokenExpiresAt
+      refreshTokenExpiresAt,
+      accessTokenId // We return this in case the controller needs to log it
     };
   } catch (error) {
     console.error("Token Generation Error:", error);
@@ -56,10 +63,13 @@ export const createDeviceFingerprint = (req) => {
 
 /**
  * Validates the Access Token
+ * Updated to match the "protect" middleware algorithm requirements
  */
 export const verifyAccessToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    return jwt.verify(token, process.env.JWT_ACCESS_SECRET, {
+      algorithms: ['HS256'] // 🛡️ Only accept HS256
+    });
   } catch (error) {
     return null;
   }

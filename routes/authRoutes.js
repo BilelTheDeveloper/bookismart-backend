@@ -1,31 +1,32 @@
 import express from 'express';
 const router = express.Router();
 
-// Controllers
+// 1. Controllers
 import { 
   register, 
   login, 
   refresh, 
   sendOTP, 
   verifyOTP,
-  logout,   // Added logout for completeness
-  verifyMe  // This is the new Ultra-Secure endpoint we added to the controller
+  logout, 
+  verifyMe 
 } from '../controllers/authController.js';
 
-// Middlewares
+// 2. Middlewares
+// 🛡️ The 'protect' middleware is now the backbone of your Redis security
 import { protect, isAdmin } from '../middleware/authMiddleware.js';
 import upload from '../config/cloudinary.js'; 
 
-/**
- * --- PUBLIC ROUTES ---
- * These routes do not require a token and are used for Onboarding & Auth.
- */
+/* ─────────────────────────────────────────────────────────────────────────────
+   PUBLIC ROUTES
+   These routes are open because they are used to GET into the system.
+   ───────────────────────────────────────────────────────────────────────────── */
 
-// 1. OTP Verification
+// 1. OTP Verification (Pre-registration checks)
 router.post('/send-otp', sendOTP);
 router.post('/verify-otp', verifyOTP);
 
-// 2. Final 5-Step Registration (Handles Text + Files via Multer/Cloudinary)
+// 2. Final Registration (Multi-part upload for KYC)
 router.post('/register', upload.fields([
     { name: 'idFront', maxCount: 1 },
     { name: 'idBack', maxCount: 1 },
@@ -33,29 +34,35 @@ router.post('/register', upload.fields([
     { name: 'profilePic', maxCount: 1 }
 ]), register);
 
-// 3. Standard Secure Login
+// 3. Secure Login (Issues the initial JTI and Fingerprint)
 router.post('/login', login);
 
-// 4. Silent Token Refresh (Uses HttpOnly Cookie)
+// 4. Silent Token Refresh (Uses HttpOnly Cookie Rotation)
 router.post('/refresh', refresh);
 
-// 5. Secure Logout
-router.post('/logout', logout);
-
-/**
- * --- PROTECTED ROUTES ---
- * These require the 'protect' middleware to verify the JWT and Fingerprint.
- */
+/* ─────────────────────────────────────────────────────────────────────────────
+   PROTECTED ROUTES
+   These require 'protect' to verify: JWT Integrity + Redis Blacklist + Fingerprint
+   ───────────────────────────────────────────────────────────────────────────── */
 
 /**
  * 🛡️ THE TRUTH ENDPOINT: /verify-me
- * Purpose: This is the ONLY route the Frontend should trust for role-checking.
- * It ignores LocalStorage and checks the signed HttpOnly cookie against the DB.
+ * Frontend uses this to confirm the user is still 'active' in DB and not blacklisted.
  */
 router.get('/verify-me', protect, verifyMe);
 
-// 6. Identity Verification (Admins Only)
+/**
+ * 🛡️ SECURE LOGOUT
+ * We ADD 'protect' here so the controller can identify the JTI and blacklist it in Redis.
+ */
+router.post('/logout', protect, logout);
+
+/**
+ * 👑 ADMIN KYC ACCESS
+ * Double-Lock: User must be authenticated (protect) AND have the 'admin' role (isAdmin).
+ */
 router.get('/admin/kyc-requests', protect, isAdmin, async (req, res) => {
+    // This would typically point to a controller like: getKycRequests
     res.json({ message: "Secure KYC data access granted." });
 });
 

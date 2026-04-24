@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { 
   generateAccessAndRefreshTokens 
 } from '../utils/tokenService.js';
+import { revokeToken } from '../middleware/authMiddleware.js'; // 🛡️ Import the revoker
 import { validateSignup } from '../validators/authValidator.js';
 import crypto from 'crypto';
 
@@ -22,7 +23,7 @@ export const sendOTP = async (req, res) => {
 
     console.log(`
     ╔════════════════════════════════════════════════════════════╗
-    ║        🔥 BOOKIIFY DEVELOPMENT VAULT 🔥              ║
+    ║         🔥 BOOKIIFY DEVELOPMENT VAULT 🔥               ║
     ╠════════════════════════════════════════════════════════════╣
     ║  TYPE:   ${type.toUpperCase().padEnd(49)} ║
     ║  TARGET: ${target.padEnd(49)} ║
@@ -99,7 +100,7 @@ export const register = async (req, res) => {
 };
 
 /**
- * @desc    Login with Triple-Lock Cookie Protection
+ * @desc    Login with Triple-Lock Cookie Protection & Redis Session ID
  */
 export const login = async (req, res) => {
   const { email, password } = req.body;
@@ -108,17 +109,21 @@ export const login = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
+    // Strict Status Check
     if (user.accountStatus === 'suspended') {
-      return res.status(403).json({ message: "Your account has been suspended. Contact support." });
+      return res.status(403).json({ message: "Account suspended. Contact support." });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
 
+    // Use the fingerprint from the request
     const deviceId = req.deviceFingerprint; 
+    
+    // 🛡️ generateAccessAndRefreshTokens now returns the jti/accessTokenId
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
 
-    // Filter and update tokens
+    // Filter old tokens for this device and update
     user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
     user.refreshTokens.push({
       token: refreshToken,
@@ -134,15 +139,19 @@ export const login = async (req, res) => {
       httpOnly: true,
       secure: true, 
       sameSite: 'none',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     };
 
+    // Access Token Cookie (15m)
     res.cookie('accessToken', accessToken, { 
       ...cookieOptions, 
       maxAge: 15 * 60 * 1000 
     });
 
-    res.cookie('refreshToken', refreshToken, cookieOptions);
+    // Refresh Token Cookie (7d)
+    res.cookie('refreshToken', refreshToken, {
+        ...cookieOptions,
+        maxAge: 7 * 24 * 60 * 60 * 1000
+    });
 
     res.json({
       message: "Authentication successful",
@@ -156,12 +165,107 @@ export const login = async (req, res) => {
     });
   } catch (err) {
     console.error(`[AUTH_CONTROLLER_ERROR]: ${err.message}`);
-    res.status(500).json({ message: "Login failed", error: err.message });
+    res.status(500).json({ message: "Login failed" });
   }
 };
 
 /**
- * @desc    Admin: Approve or Reject KYC/Account
+ * @desc    Refresh Access Token: Implements Rotation
+ */
+export const refresh = async (req, res) => {
+  const incomingRefreshToken = req.cookies.refreshToken;
+  if (!incomingRefreshToken) return res.status(401).json({ message: "Session expired" });
+
+  try {
+    const user = await User.findOne({ "refreshTokens.token": incomingRefreshToken });
+    
+    if (!user) {
+        res.clearCookie('refreshToken');
+        res.clearCookie('accessToken');
+        return res.status(403).json({ message: "Security Alert: Invalid Session" });
+    }
+
+    const deviceId = req.deviceFingerprint; 
+    const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
+
+    // Token Rotation: Delete used token, add new one
+    user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== incomingRefreshToken);
+    user.refreshTokens.push({ token: refreshToken, deviceId, expiresAt: refreshTokenExpiresAt });
+    await user.save();
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none'
+    };
+
+    res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
+    res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    
+    res.json({ message: "Session extended" });
+  } catch (err) {
+    res.status(403).json({ message: "Could not refresh session" });
+  }
+};
+
+/**
+ * @desc    Logout: Revokes Token in Redis & Clears Cookies
+ */
+export const logout = async (req, res) => {
+  try {
+    const token = req.cookies.accessToken;
+
+    // 🛡️ Kill the token in Redis so it can't be used again
+    if (token) {
+      await revokeToken(token);
+    }
+
+    // Remove Refresh Token from DB if it exists
+    const refreshToken = req.cookies.refreshToken;
+    if (refreshToken) {
+        await User.updateOne(
+            { "refreshTokens.token": refreshToken },
+            { $pull: { refreshTokens: { token: refreshToken } } }
+        );
+    }
+
+    res.clearCookie('accessToken', { httpOnly: true, secure: true, sameSite: 'none' });
+    res.clearCookie('refreshToken', { httpOnly: true, secure: true, sameSite: 'none' });
+
+    res.status(200).json({ message: "Securely logged out" });
+  } catch (err) {
+    res.status(500).json({ message: "Logout failed" });
+  }
+};
+
+/**
+ * @desc    Verify Me: High-security DB check
+ */
+export const verifyMe = async (req, res) => {
+  try {
+    // req.user comes from 'protect' middleware after DB check
+    const user = await User.findById(req.user._id).select('-password -refreshTokens');
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+        accountStatus: user.accountStatus,
+        businessName: user.businessName
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Verification failed" });
+  }
+};
+
+/**
+ * @desc    Admin: Review KYC/Account
  */
 export const reviewUser = async (req, res) => {
   const { id } = req.params;
@@ -187,83 +291,5 @@ export const reviewUser = async (req, res) => {
     res.json({ message: `User account has been ${action}ed successfully.` });
   } catch (err) {
     res.status(500).json({ message: "Review update failed" });
-  }
-};
-
-/**
- * @desc    Refresh Access Token using HttpOnly Cookies
- */
-export const refresh = async (req, res) => {
-  const incomingRefreshToken = req.cookies.refreshToken;
-  if (!incomingRefreshToken) return res.status(401).json({ message: "Session expired" });
-
-  try {
-    const user = await User.findOne({ "refreshTokens.token": incomingRefreshToken });
-    
-    if (!user) {
-        res.clearCookie('refreshToken');
-        res.clearCookie('accessToken');
-        return res.status(403).json({ message: "Security Alert: Invalid Refresh Attempt" });
-    }
-
-    const deviceId = req.deviceFingerprint; 
-    const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
-
-    user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== incomingRefreshToken);
-    user.refreshTokens.push({ token: refreshToken, deviceId, expiresAt: refreshTokenExpiresAt });
-    await user.save();
-
-    const cookieOptions = {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none'
-    };
-
-    res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
-    res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
-    
-    res.json({ message: "Session extended" });
-  } catch (err) {
-    res.status(403).json({ message: "Could not refresh session" });
-  }
-};
-
-/**
- * @desc    Logout: Clear all secure cookies
- */
-export const logout = async (req, res) => {
-  res.clearCookie('accessToken', { httpOnly: true, secure: true, sameSite: 'none' });
-  res.clearCookie('refreshToken', { httpOnly: true, secure: true, sameSite: 'none' });
-  res.status(200).json({ message: "Logged out successfully" });
-};
-
-/**
- * 🛡️ ULTRA-SECURE VERIFICATION ENDPOINT
- * @desc    Get real-time user data from DB using secure cookie
- * @route   GET /api/auth/verify-me
- * @access  Private
- */
-export const verifyMe = async (req, res) => {
-  try {
-    // req.user is attached by the 'protect' middleware
-    const user = await User.findById(req.user._id).select('-password -refreshTokens');
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.status(200).json({
-      success: true,
-      user: {
-        id: user._id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role, // Truth from DB
-        accountStatus: user.accountStatus,
-        businessName: user.businessName
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Verification failed", error: err.message });
   }
 };
