@@ -31,9 +31,9 @@ export const sendOTP = async (req, res) => {
     ╚════════════════════════════════════════════════════════════╝
     `);
 
-    res.status(200).json({ message: `OTP sent to ${target} (Check Terminal)` });
+    res.status(200).json({ success: true, message: `OTP sent to ${target} (Check Terminal)` });
   } catch (err) {
-    res.status(500).json({ message: "Failed to generate OTP" });
+    res.status(500).json({ success: false, message: "Failed to generate OTP" });
   }
 };
 
@@ -44,15 +44,15 @@ export const verifyOTP = async (req, res) => {
   const { type, target, code } = req.body;
   const storedData = otpStore.get(`${type}:${target}`);
 
-  if (!storedData) return res.status(400).json({ message: "OTP expired or not requested" });
-  if (storedData.code !== code) return res.status(400).json({ message: "Invalid verification code" });
+  if (!storedData) return res.status(400).json({ success: false, message: "OTP expired or not requested" });
+  if (storedData.code !== code) return res.status(400).json({ success: false, message: "Invalid verification code" });
   if (Date.now() > storedData.expires) {
     otpStore.delete(`${type}:${target}`);
-    return res.status(400).json({ message: "OTP has expired" });
+    return res.status(400).json({ success: false, message: "OTP has expired" });
   }
 
   otpStore.delete(`${type}:${target}`);
-  res.status(200).json({ message: "Verification successful" });
+  res.status(200).json({ success: true, message: "Verification successful" });
 };
 
 /**
@@ -61,12 +61,12 @@ export const verifyOTP = async (req, res) => {
 export const register = async (req, res) => {
   try {
     const { error } = validateSignup(req.body);
-    if (error) return res.status(400).json({ errors: error.details.map(d => d.message) });
+    if (error) return res.status(400).json({ success: false, errors: error.details.map(d => d.message) });
 
     const { email, phone, password, fullName, businessName, category, ville } = req.body;
 
     const userExists = await User.findOne({ $or: [{ email }, { phone }] });
-    if (userExists) return res.status(409).json({ message: "User with this email or phone already exists" });
+    if (userExists) return res.status(409).json({ success: false, message: "User with this email or phone already exists" });
 
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -91,11 +91,12 @@ export const register = async (req, res) => {
     });
 
     res.status(201).json({ 
+      success: true,
       message: "Application submitted successfully. Review expected within 24h.",
       userId: newUser._id 
     });
   } catch (err) {
-    res.status(500).json({ message: "Server Error during registration", error: err.message });
+    res.status(500).json({ success: false, message: "Server Error during registration", error: err.message });
   }
 };
 
@@ -107,22 +108,24 @@ export const login = async (req, res) => {
 
   try {
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ message: "Invalid credentials" });
+    if (!user) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-    // 🛡️ REJECTION GATE: Block suspended users immediately
     if (user.accountStatus === 'suspended') {
-      return res.status(403).json({ message: "Account suspended. Contact support." });
+      return res.status(403).json({ success: false, message: "Account suspended. Contact support." });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+    if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-    // 🛡️ IDENTITY GATE: Use our fixed fingerprint
-    const deviceId = req.deviceFingerprint; 
+    // 🛡️ IDENTITY GATE SYNC: Robust lookup for non-enumerable fingerprints
+    const deviceId = req.deviceFingerprint || req.headers['x-device-fingerprint']; 
+
+    if (!deviceId) {
+       return res.status(400).json({ success: false, message: "Security Binding Error: Missing Device Identity" });
+    }
     
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
 
-    // Clean up old sessions for this specific device
     user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
     user.refreshTokens.push({
       token: refreshToken,
@@ -144,6 +147,7 @@ export const login = async (req, res) => {
     res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
 
     res.json({
+      success: true,
       message: "Authentication successful",
       user: {
         id: user._id,
@@ -155,7 +159,7 @@ export const login = async (req, res) => {
     });
   } catch (err) {
     console.error(`[AUTH_CONTROLLER_ERROR]: ${err.message}`);
-    res.status(500).json({ message: "Login failed" });
+    res.status(500).json({ success: false, message: "Login failed" });
   }
 };
 
@@ -164,22 +168,22 @@ export const login = async (req, res) => {
  */
 export const refresh = async (req, res) => {
   const incomingRefreshToken = req.cookies.refreshToken;
-  if (!incomingRefreshToken) return res.status(401).json({ message: "Session expired" });
+  if (!incomingRefreshToken) return res.status(401).json({ success: false, message: "Session expired" });
 
   try {
     const user = await User.findOne({ "refreshTokens.token": incomingRefreshToken });
     
-    // 🛡️ SECURITY SHUTDOWN: If user is suspended, kill tokens during refresh
     if (!user || user.accountStatus === 'suspended') {
-        res.clearCookie('refreshToken', { httpOnly: true, secure: true, sameSite: 'none' });
-        res.clearCookie('accessToken', { httpOnly: true, secure: true, sameSite: 'none' });
-        return res.status(403).json({ message: "Security Alert: Access Revoked" });
+        const clearOpt = { httpOnly: true, secure: true, sameSite: 'none' };
+        res.clearCookie('refreshToken', clearOpt);
+        res.clearCookie('accessToken', clearOpt);
+        return res.status(403).json({ success: false, message: "Security Alert: Access Revoked" });
     }
 
-    const deviceId = req.deviceFingerprint; 
+    // 🛡️ IDENTITY GATE SYNC: Ensure rotation respects the fingerprint
+    const deviceId = req.deviceFingerprint || req.headers['x-device-fingerprint']; 
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, deviceId);
 
-    // Token Rotation (Prevents Replay Attacks)
     user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== incomingRefreshToken);
     user.refreshTokens.push({ token: refreshToken, deviceId, expiresAt: refreshTokenExpiresAt });
     await user.save();
@@ -189,9 +193,9 @@ export const refresh = async (req, res) => {
     res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
     res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
     
-    res.json({ message: "Session extended" });
+    res.json({ success: true, message: "Session extended" });
   } catch (err) {
-    res.status(403).json({ message: "Could not refresh session" });
+    res.status(403).json({ success: false, message: "Could not refresh session" });
   }
 };
 
@@ -218,9 +222,9 @@ export const logout = async (req, res) => {
     res.clearCookie('accessToken', cookieOptions);
     res.clearCookie('refreshToken', cookieOptions);
 
-    res.status(200).json({ message: "Securely logged out" });
+    res.status(200).json({ success: true, message: "Securely logged out" });
   } catch (err) {
-    res.status(500).json({ message: "Logout failed" });
+    res.status(500).json({ success: false, message: "Logout failed" });
   }
 };
 
@@ -231,7 +235,7 @@ export const verifyMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password -refreshTokens');
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
     res.status(200).json({
       success: true,
@@ -245,7 +249,7 @@ export const verifyMe = async (req, res) => {
       }
     });
   } catch (err) {
-    res.status(500).json({ message: "Verification failed" });
+    res.status(500).json({ success: false, message: "Verification failed" });
   }
 };
 
@@ -258,7 +262,7 @@ export const reviewUser = async (req, res) => {
 
   try {
     const user = await User.findById(id);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
     if (action === 'approve') {
       user.accountStatus = 'active';
@@ -269,12 +273,12 @@ export const reviewUser = async (req, res) => {
       user.kyc.status = 'rejected';
       user.kyc.rejectionReason = reason || "Documents did not meet requirements.";
     } else {
-      return res.status(400).json({ message: "Invalid action" });
+      return res.status(400).json({ success: false, message: "Invalid action" });
     }
 
     await user.save();
-    res.json({ message: `User account has been ${action}ed successfully.` });
+    res.json({ success: true, message: `User account has been ${action}ed successfully.` });
   } catch (err) {
-    res.status(500).json({ message: "Review update failed" });
+    res.status(500).json({ success: false, message: "Review update failed" });
   }
 };

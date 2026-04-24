@@ -81,10 +81,12 @@ export const protect = async (req, res, next) => {
   const requestId = generateRequestId();
 
   /* ── 1. Extract token from HttpOnly cookie ONLY ── */
-  const token = req.cookies?.accessToken;
+  // Enhanced to check both standard and signed cookies for maximum reliability
+  const token = req.cookies?.accessToken || req.signedCookies?.accessToken;
 
   if (!token) {
     return res.status(401).json({
+      success: false,
       message : 'Not authorized, access token missing',
       code    : 'TOKEN_MISSING',
     });
@@ -101,6 +103,7 @@ export const protect = async (req, res, next) => {
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
+        success: false,
         message : 'Session expired',
         code    : 'TOKEN_EXPIRED',
       });
@@ -108,6 +111,7 @@ export const protect = async (req, res, next) => {
 
     secLog.breach('Invalid token presented', { requestId, reason: error.message });
     return res.status(401).json({
+      success: false,
       message : 'Invalid token',
       code    : 'TOKEN_INVALID',
     });
@@ -115,7 +119,7 @@ export const protect = async (req, res, next) => {
 
   /* ── 4. JTI blacklist check (Redis) ── */
   if (!decoded.jti) {
-    return res.status(401).json({ message: 'Invalid token structure', code: 'TOKEN_INVALID' });
+    return res.status(401).json({ success: false, message: 'Invalid token structure', code: 'TOKEN_INVALID' });
   }
 
   try {
@@ -123,6 +127,7 @@ export const protect = async (req, res, next) => {
     if (isRevoked) {
       secLog.breach('Revoked token reuse attempt', { requestId, jti: decoded.jti });
       return res.status(401).json({
+        success: false,
         message : 'Token has been revoked',
         code    : 'TOKEN_REVOKED',
       });
@@ -130,17 +135,23 @@ export const protect = async (req, res, next) => {
   } catch (redisError) {
     secLog.error('Redis unavailable during jti check', { requestId, error: redisError.message });
     return res.status(503).json({
+      success: false,
       message : 'Authentication service temporarily unavailable',
       code    : 'AUTH_SERVICE_DOWN',
     });
   }
 
-  /* ── 5. Strict fingerprint enforcement (timing-safe) ──
-     MODIFIED: Using req.deviceFingerprint to sync with the Fingerprinter middleware logic. */
-  const currentFingerprint = req.deviceFingerprint;
+  /* ── 5. Strict fingerprint enforcement (timing-safe) ── */
+  /**
+   * FIX: We check the non-enumerable property 'deviceFingerprint' first, 
+   * then fallback to the header if the middleware property is detached.
+   */
+  const currentFingerprint = req.deviceFingerprint || req.headers['x-device-fingerprint'];
 
   if (!decoded.fingerprint || !currentFingerprint) {
+    secLog.warn('Identity binding missing', { requestId, tokenBound: !!decoded.fingerprint, reqBound: !!currentFingerprint });
     return res.status(401).json({
+      success: false,
       message : 'Missing identity binding',
       code    : 'FINGERPRINT_MISSING',
     });
@@ -158,13 +169,15 @@ export const protect = async (req, res, next) => {
 
     if (limitHit) {
       return res.status(429).json({
+        success: false,
         message : 'Too many security violations. Account temporarily locked.',
         code    : 'BREACH_LIMIT_EXCEEDED',
       });
     }
 
     return res.status(401).json({
-      message : 'Device mismatch',
+      success: false,
+      message : 'Device mismatch. Security vault has terminated this session.',
       code    : 'FINGERPRINT_MISMATCH',
     });
   }
@@ -175,11 +188,12 @@ export const protect = async (req, res, next) => {
     user = await User.findById(decoded.id).select('-password -__v');
   } catch (dbError) {
     secLog.error('DB error during user fetch', { requestId, error: dbError.message });
-    return res.status(503).json({ message: 'Service temporarily unavailable' });
+    return res.status(503).json({ success: false, message: 'Service temporarily unavailable' });
   }
 
   if (!user) {
     return res.status(401).json({
+      success: false,
       message : 'User no longer exists',
       code    : 'USER_NOT_FOUND',
     });
@@ -193,6 +207,7 @@ export const protect = async (req, res, next) => {
       status : user.accountStatus,
     });
     return res.status(403).json({
+      success: false,
       message : 'Account access restricted',
       code    : 'ACCOUNT_RESTRICTED',
     });
@@ -211,7 +226,7 @@ export const protect = async (req, res, next) => {
 
 export const isAdmin = (req, res, next) => {
   if (!req.user) {
-    return res.status(401).json({ message: 'Authentication required', code: 'NOT_AUTHENTICATED' });
+    return res.status(401).json({ success: false, message: 'Authentication required', code: 'NOT_AUTHENTICATED' });
   }
   if (req.user.role === 'admin') return next();
 
@@ -220,6 +235,7 @@ export const isAdmin = (req, res, next) => {
     userId    : req.user._id.toString(),
   });
   return res.status(403).json({
+    success: false,
     message : 'Access denied: admin privileges required',
     code    : 'FORBIDDEN',
   });
@@ -227,7 +243,7 @@ export const isAdmin = (req, res, next) => {
 
 export const requireRole = (...roles) => (req, res, next) => {
   if (!req.user) {
-    return res.status(401).json({ message: 'Authentication required', code: 'NOT_AUTHENTICATED' });
+    return res.status(401).json({ success: false, message: 'Authentication required', code: 'NOT_AUTHENTICATED' });
   }
   if (roles.includes(req.user.role)) return next();
 
@@ -238,6 +254,7 @@ export const requireRole = (...roles) => (req, res, next) => {
     required   : roles,
   });
   return res.status(403).json({
+    success: false,
     message : `Access denied: requires one of [${roles.join(', ')}]`,
     code    : 'FORBIDDEN',
   });
