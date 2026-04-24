@@ -54,21 +54,26 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 /**
- * 🛡️ CUSTOM ENTERPRISE SANITIZER (The Fix)
- * This manually scrubs $ and . from keys without triggering the 
- * "IncomingMessage getter" 500 error found in the mongo-sanitize library.
+ * 🛡️ CUSTOM ENTERPRISE SANITIZER (Final Fixed Version)
+ * Purpose: Manually scrubs $ and . from keys to prevent NoSQL injection.
+ * Fix: Properly scopes 'sanitizedKey' to prevent ReferenceErrors during recursion.
  */
 app.use((req, res, next) => {
   const sanitize = (obj) => {
-    if (obj instanceof Object) {
+    if (obj instanceof Object && !Buffer.isBuffer(obj)) {
       for (const key in obj) {
-        if (key.startsWith('$') || key.includes('.')) {
-          const newKey = key.replace(/\$/g, '_').replace(/\./g, '_');
-          obj[newKey] = obj[key];
-          delete obj[key];
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (key.startsWith('$') || key.includes('.')) {
+            const sanitizedKey = key.replace(/\$/g, '_').replace(/\./g, '_');
+            obj[sanitizedKey] = obj[key];
+            delete obj[key];
+            // Recurse into the new key
+            if (obj[sanitizedKey] instanceof Object) sanitize(obj[sanitizedKey]);
+          } else {
+            // Recurse into existing key
+            if (obj[key] instanceof Object) sanitize(obj[key]);
+          }
         }
-        if (obj[newKey] instanceof Object) sanitize(obj[newKey]);
-        else if (obj[key] instanceof Object) sanitize(obj[key]);
       }
     }
   };
@@ -103,7 +108,7 @@ app.use('/api/merchant/website', websiteRoutes);
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "online",
-    security: "Enterprise-Grade / Redis + Fingerprinting v2.2",
+    security: "Enterprise-Grade / Redis + Fingerprinting v2.3",
     timestamp: new Date().toISOString()
   });
 });
