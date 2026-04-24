@@ -57,22 +57,23 @@ app.use(cors({
 // 🛡️ DATA PARSING (Foundation for all identity checks)
 app.use(express.json({ limit: '10mb' })); 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cookieParser()); // 🚨 Required BEFORE fingerprinter
-
-/**
- * 🛡️ THE FINGERPRINT GATE
- * Locks the identity using the UUID/Hardware combo before any other logic.
- */
-app.use(fingerprinter);
+app.use(cookieParser()); // 🚨 Required BEFORE security logic
 
 /**
  * 🛡️ NO-SQL INJECTION PROTECTION (Enterprise Fix)
- * Added replaceWith to prevent the "Cannot set property query of #<IncomingMessage>" 500 error.
+ * FIXED: This must run IMMEDIATELY after parsing and BEFORE the fingerprinter.
+ * This prevents the "Cannot set property query of #<IncomingMessage>" error.
  */
 app.use(mongoSanitize({
   replaceWith: '_',
   allowDots: true,
 }));
+
+/**
+ * 🛡️ THE FINGERPRINT GATE
+ * Now runs on sanitized data to lock the identity securely.
+ */
+app.use(fingerprinter);
 
 // 🛡️ GLOBAL RATE LIMITING
 const limiter = rateLimit({
