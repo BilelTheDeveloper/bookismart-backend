@@ -1,68 +1,85 @@
 import User from '../models/User.js';
 
 /**
- * 🔒 MILITARY-GRADE ADMIN GUARD (Cookie-Protocol Edition)
- * Purpose: Acts as the second "Checkpoint" after the token is verified.
- * Logic: Validates the user's live role and status against the database.
+ * 🔒 MILITARY-GRADE ADMIN GUARD (Enterprise Edition)
+ * * REQUIREMENTS:
+ * 1. Must be placed AFTER the 'protect' middleware in your routes.
+ * 2. Relies on the verified 'req.user' context provided by the Vault.
  */
 export const adminGuard = async (req, res, next) => {
   try {
-    // 1. Check if 'protect' middleware successfully attached the user
-    // Since we use HttpOnly cookies, the user must be authenticated first.
+    /* ── 1. CONTEXT INTEGRITY CHECK ──
+       Ensure the 'protect' middleware has already successfully 
+       authenticated the user and bound them to the request. */
     if (!req.user) {
       return res.status(401).json({ 
         success: false, 
-        message: "Authentication required. Access denied." 
+        message: "Authentication context missing. Access denied.",
+        code: "UNAUTHORIZED" 
       });
     }
 
-    // 2. Real-Time Database Validation
-    // We fetch fresh data to ensure the HttpOnly cookie hasn't outlived the user's permissions.
-    const user = await User.findById(req.user._id).select('role accountStatus kyc email');
+    /* ── 2. REAL-TIME CLEARANCE RE-VERIFICATION ──
+       Even though 'protect' did a DB check, the AdminGuard performs a 
+       specific role-fetch to ensure permissions haven't been revoked 
+       in the last millisecond. */
+    const user = await User.findById(req.user._id).select('role accountStatus email');
 
     if (!user) {
       return res.status(404).json({ 
         success: false, 
-        message: "User account no longer exists." 
+        message: "Identity could not be verified in the Vault.",
+        code: "USER_NOT_FOUND"
       });
     }
 
-    // 3. Status Integrity Check
-    // Prevents access if an account was suspended AFTER the cookie was issued.
+    /* ── 3. STATUS LOCK ──
+       Hard-reject any user whose status is not 'active', even if they 
+       have an admin role. This prevents 'Banned Admins' from accessing. */
     if (user.accountStatus !== 'active') {
       return res.status(403).json({ 
         success: false, 
-        message: `Access denied. Your account is currently: ${user.accountStatus}` 
+        message: `Administrative access restricted. Account status: ${user.accountStatus}`,
+        code: "ACCOUNT_RESTRICTED"
       });
     }
 
-    /**
-     * 4. Role Hierarchy Verification
-     * IMPORTANT: We keep 'admin' and 'owner' as authorized for the backend logic,
-     * but your frontend AdminGuard will filter which dashboard they actually see.
-     */
-    const authorizedRoles = ['admin', 'owner'];
+    /* ── 4. ROLE HIERARCHY ENFORCEMENT ──
+       Only 'admin' and 'owner' bypass this gate. 
+       We use an allowlist approach for maximum security. */
+    const AUTHORIZED_ADMIN_ROLES = ['admin', 'owner'];
     
-    if (!authorizedRoles.includes(user.role)) {
-      console.warn(`[SECURITY ALERT]: Unauthorized access attempt by ${user.email}`);
+    if (!AUTHORIZED_ADMIN_ROLES.includes(user.role)) {
+      // 🚨 SECURITY AUDIT: Log the attempt for forensics
+      console.warn(JSON.stringify({
+        level: 'SECURITY_ALERT',
+        msg: 'Unauthorized Administrative Access Attempt',
+        user: user.email,
+        attemptedRole: user.role,
+        ts: new Date().toISOString()
+      }));
       
       return res.status(403).json({ 
         success: false, 
-        message: "Forbidden: You do not have administrative clearance for this zone." 
+        message: "Access Denied: You do not have the required clearance level.",
+        code: "FORBIDDEN" 
       });
     }
 
-    // 5. Context Injection
-    // We update req.user with the fresh DB data for the next controller.
+    /* ── 5. FINAL CONTEXT INJECTION ──
+       Inject the fully refreshed user object into the request for 
+       downstream controllers (e.g., req.user.role will be available). */
     req.user = user;
 
-    next(); // Security checks passed. Welcome to the Vault.
+    next(); // All clearance checks passed.
     
   } catch (error) {
+    // 🛡️ Fail-Safe: On any internal crash, we block access (Fail Closed)
     console.error(`[ADMIN_GUARD_CRASH]: ${error.message}`);
     res.status(500).json({ 
       success: false, 
-      message: "Internal Security Engine Error." 
+      message: "Internal Security Engine failure.",
+      code: "INTERNAL_SECURITY_ERROR"
     });
   }
 };
