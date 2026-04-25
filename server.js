@@ -1,20 +1,22 @@
-import 'dotenv/config'; // 🚨 MUST BE FIRST: Loads .env variables
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import https from 'https';
+import http from 'http';
 import connectDB from './config/db.js';
 
 // 🚀 REDIS SECURITY ENGINE
-import './config/redis.js'; // Initialize Redis connection early
+import './config/redis.js';
 
 // Middlewares & Routes
 import { fingerprinter } from './middleware/fingerprint.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
-import websiteRoutes from './routes/websiteroutes.js'; 
-import publicRoutes from './routes/publicRoutes.js'; 
+import websiteRoutes from './routes/websiteroutes.js';
+import publicRoutes from './routes/publicRoutes.js';
 
 /**
  * 1. DATABASE CONNECTION
@@ -29,34 +31,32 @@ const app = express();
 app.set('trust proxy', 1);
 
 /**
- * 2. POWER SECURITY HARDENING & CORS
+ * 2. SECURITY HARDENING & CORS
  */
 app.use(helmet());
 
 app.use(cors({
   origin: [
-    "https://bookiify.vercel.app", 
+    "https://bookiify.vercel.app",
     "http://localhost:5173",
-    process.env.CLIENT_URL 
-  ].filter(Boolean), 
-  credentials: true, 
+    process.env.CLIENT_URL
+  ].filter(Boolean),
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'x-device-fingerprint', 
+    'Content-Type',
+    'Authorization',
+    'x-device-fingerprint',
     'Accept'
   ]
 }));
 
 // 🛡️ DATA PARSING
-app.use(express.json({ limit: '10mb' })); 
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 /**
- * 🛡️ CUSTOM ENTERPRISE SANITIZER (Final Fixed Version)
- * Purpose: Manually scrubs $ and . from keys to prevent NoSQL injection.
- * Fix: Properly scopes 'sanitizedKey' to prevent ReferenceErrors during recursion.
+ * 🛡️ CUSTOM ENTERPRISE SANITIZER
  */
 app.use((req, res, next) => {
   const sanitize = (obj) => {
@@ -67,10 +67,8 @@ app.use((req, res, next) => {
             const sanitizedKey = key.replace(/\$/g, '_').replace(/\./g, '_');
             obj[sanitizedKey] = obj[key];
             delete obj[key];
-            // Recurse into the new key
             if (obj[sanitizedKey] instanceof Object) sanitize(obj[sanitizedKey]);
           } else {
-            // Recurse into existing key
             if (obj[key] instanceof Object) sanitize(obj[key]);
           }
         }
@@ -84,13 +82,13 @@ app.use((req, res, next) => {
 });
 
 // 🛡️ COOKIES & IDENTITY
-app.use(cookieParser()); 
+app.use(cookieParser());
 app.use(fingerprinter);
 
 // 🛡️ GLOBAL RATE LIMITING
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 100, 
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
@@ -100,10 +98,18 @@ app.use('/api/', limiter);
 /**
  * 3. ROUTE DEFINITIONS
  */
-app.use('/api/public', publicRoutes); 
+app.use('/api/public', publicRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/merchant/website', websiteRoutes); 
+app.use('/api/merchant/website', websiteRoutes);
+
+// Health check endpoint (used by keep-alive pinger)
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'online',
+    timestamp: new Date().toISOString()
+  });
+});
 
 app.get('/', (req, res) => {
   res.status(200).json({
@@ -114,12 +120,11 @@ app.get('/', (req, res) => {
 });
 
 /**
- * 4. ERROR HANDLING (Global)
+ * 4. ERROR HANDLING
  */
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   console.error(`[SERVER_ERROR]: ${err.message}`);
-  
   res.status(statusCode).json({
     success: false,
     message: err.message,
@@ -131,8 +136,66 @@ app.use((err, req, res, next) => {
  * 5. SERVER START
  */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 System Online: Port ${PORT}`);
   console.log(`🔒 Security: Enterprise Redis Blacklist Active`);
   console.log(`📡 Identity: Device Fingerprinting Gateway Live`);
+
+  // Start keep-alive after server is ready
+  startKeepAlive();
+});
+
+/**
+ * 6. KEEP-ALIVE PINGER
+ * Pings /health every 10 minutes so Render free plan never sleeps.
+ * Only active in production — silent in development.
+ */
+function startKeepAlive() {
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('⏸️  Keep-alive disabled (development mode)');
+    return;
+  }
+
+  const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  const INTERVAL  = 10 * 60 * 1000; // 10 minutes
+
+  const ping = () => {
+    const url = `${SELF_URL}/health`;
+    const lib = url.startsWith('https') ? https : http;
+
+    const req = lib.get(url, (res) => {
+      if (res.statusCode === 200) {
+        console.log(`💓 Keep-alive OK [${new Date().toLocaleTimeString()}]`);
+      } else {
+        console.warn(`⚠️  Keep-alive got status ${res.statusCode}`);
+      }
+      res.resume(); // drain response to free memory
+    });
+
+    req.on('error', (err) => {
+      console.warn(`⚠️  Keep-alive error: ${err.message}`);
+    });
+
+    // Never let the request hang
+    req.setTimeout(10000, () => {
+      req.destroy();
+      console.warn('⚠️  Keep-alive timed out');
+    });
+  };
+
+  // First ping after 1 min (let server stabilise), then every 10 min
+  setTimeout(() => {
+    ping();
+    setInterval(ping, INTERVAL);
+  }, 60 * 1000);
+
+  console.log(`💓 Keep-alive active → pinging ${SELF_URL}/health every 10 min`);
+}
+
+/**
+ * 7. UNHANDLED REJECTION GUARD
+ */
+process.on('unhandledRejection', (err) => {
+  console.error(`❌ Unhandled Rejection: ${err.message}`);
+  server.close(() => process.exit(1));
 });
