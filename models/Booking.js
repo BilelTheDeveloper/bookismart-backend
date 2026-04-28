@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const BookingSchema = new mongoose.Schema({
   // 1. RELATIONSHIPS
@@ -77,4 +77,8 @@ const BookingSchema = new mongoose.Schema({
 // Create an index to prevent double bookings for the same owner at the same time
 BookingSchema.index({ ownerId: 1, dateString: 1, timeSlot: 1 }, { unique: true });
 
-module.exports = mongoose.model('Booking', BookingSchema);
+// 🛡️ FIX: Create the model constant
+const Booking = mongoose.model('Booking', BookingSchema);
+
+// 🛡️ FIX: Use export default instead of module.exports
+export default Booking;
