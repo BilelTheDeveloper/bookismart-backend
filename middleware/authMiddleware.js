@@ -81,7 +81,6 @@ export const protect = async (req, res, next) => {
   const requestId = generateRequestId();
 
   /* ── 1. Extract token from HttpOnly cookie ONLY ── */
-  // Enhanced to check both standard and signed cookies for maximum reliability
   const token = req.cookies?.accessToken || req.signedCookies?.accessToken;
 
   if (!token) {
@@ -143,16 +142,16 @@ export const protect = async (req, res, next) => {
 
   /* ── 5. Strict fingerprint enforcement (timing-safe) ── */
   /**
-   * FIX: We check the non-enumerable property 'deviceFingerprint' first, 
-   * then fallback to the header if the middleware property is detached.
+   * UPDATE: We rely on the 'deviceFingerprint' property from the fingerprinter middleware.
+   * If it's missing (due to race condition), we return FINGERPRINT_MISSING.
    */
-  const currentFingerprint = req.deviceFingerprint || req.headers['x-device-fingerprint'];
+  const currentFingerprint = req.deviceFingerprint;
 
   if (!decoded.fingerprint || !currentFingerprint) {
-    secLog.warn('Identity binding missing', { requestId, tokenBound: !!decoded.fingerprint, reqBound: !!currentFingerprint });
+    secLog.warn('Identity binding incomplete', { requestId, tokenBound: !!decoded.fingerprint, reqBound: !!currentFingerprint });
     return res.status(401).json({
       success: false,
-      message : 'Missing identity binding',
+      message : 'Missing identity binding. Handshake incomplete.',
       code    : 'FINGERPRINT_MISSING',
     });
   }

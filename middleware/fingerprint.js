@@ -2,9 +2,9 @@ import crypto from 'crypto';
 import { calculateServerAnchor } from '../utils/fingerprintHelper.js';
 
 /**
- * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING (Ultra-Secured - V2)
+ * 🔒 ENTERPRISE MULTI-FACTOR FINGERPRINTING (Ultra-Secured - V2.1)
  * Purpose: Bridges Frontend UUID with Backend Hardware Anchors.
- * FIX: Replaces "Client-Wins" logic with "Server-Anchor Binding".
+ * FIX: Removes 'no_header' fallback to prevent race-condition mismatches.
  */
 export const fingerprinter = (req, res, next) => {
   try {
@@ -12,29 +12,28 @@ export const fingerprinter = (req, res, next) => {
     const clientHeaderFingerprint = req.headers['x-device-fingerprint'];
 
     // 2. SERVER-SIDE ANCHOR: The Absolute Source of Truth
-    // Uses the unified utility (IP | UserAgent)
     const hardwareAnchor = calculateServerAnchor(req);
 
     /**
      * 🛡️ THE SECURITY BINDING LOGIC
-     * FIX: We combine BOTH factors. 
-     * Even if an attacker steals the token and the header, 
-     * they cannot spoof the Hardware Anchor (IP/UA) easily.
+     * FIX: If the header is missing, we set boundIdentity to null.
+     * This prevents creating a mismatch string (like hash-no_header) 
+     * that triggers false security alerts during the first login load.
      */
-    const boundIdentity = `${hardwareAnchor}-${clientHeaderFingerprint || 'no_header'}`;
+    const boundIdentity = clientHeaderFingerprint 
+      ? `${hardwareAnchor}-${clientHeaderFingerprint}` 
+      : null;
 
     /**
      * 🛡️ SECURE ATTACHMENT
-     * We use Object.defineProperty to attach these securely.
-     * This prevents 'express-mongo-sanitize' from trying to "clean" these 
-     * properties, which causes the 500 "Getter" errors.
+     * Using Object.defineProperty prevents sanitizers from stripping these properties.
      */
     
     // The Final Combined Identity for Token Comparison
     Object.defineProperty(req, 'deviceFingerprint', {
       value: boundIdentity,
       writable: true,
-      enumerable: false, // 👈 THE FIX: Sanitizers won't trip over this
+      enumerable: false, 
       configurable: true
     });
 
@@ -42,12 +41,16 @@ export const fingerprinter = (req, res, next) => {
     Object.defineProperty(req, 'fingerprintAnchor', {
       value: hardwareAnchor,
       writable: true,
-      enumerable: false, // 👈 THE FIX: Sanitizers won't trip over this
+      enumerable: false,
       configurable: true
     });
 
-    // Log the first 10 chars for debugging in Render
-    console.log(`[Security Hub] Identity Locked: ${boundIdentity.substring(0, 10)}...`);
+    // Logging for Render monitoring
+    if (boundIdentity) {
+      console.log(`[Security Hub] Identity Locked: ${boundIdentity.substring(0, 10)}...`);
+    } else {
+      console.warn(`[Security Hub] Identity Incomplete: Missing Client Header`);
+    }
 
     next();
   } catch (error) {
@@ -55,8 +58,7 @@ export const fingerprinter = (req, res, next) => {
     
     /**
      * 🛡️ FAIL CLOSED PROTOCOL
-     * FIX: We do NOT call next(). If the security engine fails, 
-     * the request must be terminated immediately with a 500 error.
+     * If the security engine fails, terminate immediately.
      */
     return res.status(500).json({ 
       success: false, 

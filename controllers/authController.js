@@ -102,7 +102,6 @@ export const register = async (req, res) => {
 
 /**
  * @desc    Login with Triple-Lock Cookie Protection & Unified Identity Binding
- * FIX: Pass req and deviceId to token service for combined hashing
  */
 export const login = async (req, res) => {
   const { email, password } = req.body;
@@ -121,11 +120,18 @@ export const login = async (req, res) => {
     // 🛡️ IDENTITY GATE SYNC: Use client header for initial binding
     const deviceId = req.headers['x-device-fingerprint']; 
 
+    /**
+     * UPDATE: If deviceId is missing, we return 401 FINGERPRINT_REQUIRED.
+     * This allows the frontend interceptor to retry the request once the fingerprint is ready.
+     */
     if (!deviceId) {
-       return res.status(400).json({ success: false, message: "Security Binding Error: Missing Device Identity" });
+       return res.status(401).json({ 
+         success: false, 
+         code: 'FINGERPRINT_REQUIRED', 
+         message: "Security Identity not synchronized. Retrying..." 
+       });
     }
     
-    // THE UPDATE: Passing req ensures the Server-Side Anchor is combined with the Header
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
 
     user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
@@ -182,10 +188,20 @@ export const refresh = async (req, res) => {
         return res.status(403).json({ success: false, message: "Security Alert: Access Revoked" });
     }
 
-    // 🛡️ IDENTITY GATE SYNC: Ensure rotation respects the hardware anchor
+    // 🛡️ IDENTITY GATE SYNC
     const deviceId = req.headers['x-device-fingerprint']; 
     
-    // THE UPDATE: Passing req ensures the Server-Side Anchor is combined with the Header
+    /**
+     * UPDATE: Same logic for refresh to handle race conditions during token rotation.
+     */
+    if (!deviceId) {
+       return res.status(401).json({ 
+         success: false, 
+         code: 'FINGERPRINT_REQUIRED', 
+         message: "Security Identity not synchronized." 
+       });
+    }
+
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
 
     user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== incomingRefreshToken);
@@ -237,7 +253,6 @@ export const logout = async (req, res) => {
  */
 export const verifyMe = async (req, res) => {
   try {
-    // 🛡️ PERFORMANCE UPDATE: req.user is already populated by protect middleware
     const user = await User.findById(req.user._id).select('-password -refreshTokens');
 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
