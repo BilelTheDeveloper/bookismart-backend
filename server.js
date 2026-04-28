@@ -27,13 +27,17 @@ const app = express();
 
 /**
  * 🛡️ RENDER PROXY TRUST
+ * Necessary for secure cookies and accurate IP fingerprinting behind a load balancer.
  */
 app.set('trust proxy', 1);
 
 /**
  * 2. SECURITY HARDENING & CORS
  */
-app.use(helmet());
+// 🚨 UPDATE: Configured Helmet to allow Cross-Origin Resource Sharing for cookies
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 app.use(cors({
   origin: [
@@ -41,7 +45,7 @@ app.use(cors({
     "http://localhost:5173",
     process.env.CLIENT_URL
   ].filter(Boolean),
-  credentials: true,
+  credentials: true, // Required for HttpOnly cookies
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -147,8 +151,6 @@ const server = app.listen(PORT, () => {
 
 /**
  * 6. KEEP-ALIVE PINGER
- * Pings /health every 10 minutes so Render free plan never sleeps.
- * Only active in production — silent in development.
  */
 function startKeepAlive() {
   if (process.env.NODE_ENV !== 'production') {
@@ -156,7 +158,8 @@ function startKeepAlive() {
     return;
   }
 
-  const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  // 🚨 UPDATE: Force HTTPS for the keep-alive ping on production
+  const SELF_URL = process.env.RENDER_EXTERNAL_URL || `https://bookismart-backend.onrender.com`;
   const INTERVAL  = 10 * 60 * 1000; // 10 minutes
 
   const ping = () => {
@@ -169,21 +172,19 @@ function startKeepAlive() {
       } else {
         console.warn(`⚠️  Keep-alive got status ${res.statusCode}`);
       }
-      res.resume(); // drain response to free memory
+      res.resume(); 
     });
 
     req.on('error', (err) => {
       console.warn(`⚠️  Keep-alive error: ${err.message}`);
     });
 
-    // Never let the request hang
     req.setTimeout(10000, () => {
       req.destroy();
       console.warn('⚠️  Keep-alive timed out');
     });
   };
 
-  // First ping after 1 min (let server stabilise), then every 10 min
   setTimeout(() => {
     ping();
     setInterval(ping, INTERVAL);

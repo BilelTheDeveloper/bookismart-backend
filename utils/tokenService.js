@@ -69,6 +69,21 @@ export const getBoundIdentity = (req, clientHeader) => {
 };
 
 /**
+ * 🛡️ ENTERPRISE COOKIE POLICY
+ * UPDATE: This centralizes the cookie configuration to fix Vercel/Render cross-domain blocking.
+ * 'sameSite: none' is mandatory for cross-site cookie transmission.
+ */
+export const getCookieOptions = () => {
+  return {
+    httpOnly: true,
+    secure: true, // Required for sameSite: 'none'
+    sameSite: 'none', 
+    path: '/',
+    // If you are on a custom domain, you might need: domain: '.yourdomain.com'
+  };
+};
+
+/**
  * @desc    Validates the Access Token
  */
 export const verifyAccessToken = (token) => {

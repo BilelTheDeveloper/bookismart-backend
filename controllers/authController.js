@@ -1,7 +1,8 @@
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
 import { 
-  generateAccessAndRefreshTokens 
+  generateAccessAndRefreshTokens,
+  getCookieOptions // 🛡️ Import the central cookie policy
 } from '../utils/tokenService.js';
 import { revokeToken } from '../middleware/authMiddleware.js'; 
 import { validateSignup } from '../validators/authValidator.js';
@@ -117,13 +118,8 @@ export const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-    // 🛡️ IDENTITY GATE SYNC: Use client header for initial binding
     const deviceId = req.headers['x-device-fingerprint']; 
 
-    /**
-     * UPDATE: If deviceId is missing, we return 401 FINGERPRINT_REQUIRED.
-     * This allows the frontend interceptor to retry the request once the fingerprint is ready.
-     */
     if (!deviceId) {
        return res.status(401).json({ 
          success: false, 
@@ -145,11 +141,8 @@ export const login = async (req, res) => {
     user.lastLogin = Date.now();
     await user.save();
 
-    const cookieOptions = {
-      httpOnly: true,
-      secure: true, 
-      sameSite: 'none',
-    };
+    // 🛡️ UPDATE: Apply the central cookie policy to fix cross-domain blocking
+    const cookieOptions = getCookieOptions();
 
     res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
     res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
@@ -181,19 +174,17 @@ export const refresh = async (req, res) => {
   try {
     const user = await User.findOne({ "refreshTokens.token": incomingRefreshToken });
     
+    // 🛡️ UPDATE: Use policy for clearing cookies
+    const cookieOptions = getCookieOptions();
+
     if (!user || user.accountStatus === 'suspended') {
-        const clearOpt = { httpOnly: true, secure: true, sameSite: 'none' };
-        res.clearCookie('refreshToken', clearOpt);
-        res.clearCookie('accessToken', clearOpt);
+        res.clearCookie('refreshToken', cookieOptions);
+        res.clearCookie('accessToken', cookieOptions);
         return res.status(403).json({ success: false, message: "Security Alert: Access Revoked" });
     }
 
-    // 🛡️ IDENTITY GATE SYNC
     const deviceId = req.headers['x-device-fingerprint']; 
     
-    /**
-     * UPDATE: Same logic for refresh to handle race conditions during token rotation.
-     */
     if (!deviceId) {
        return res.status(401).json({ 
          success: false, 
@@ -208,8 +199,7 @@ export const refresh = async (req, res) => {
     user.refreshTokens.push({ token: refreshToken, deviceId, expiresAt: refreshTokenExpiresAt });
     await user.save();
 
-    const cookieOptions = { httpOnly: true, secure: true, sameSite: 'none' };
-
+    // 🛡️ UPDATE: Consistently apply policy during rotation
     res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
     res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
     
@@ -238,7 +228,8 @@ export const logout = async (req, res) => {
         );
     }
 
-    const cookieOptions = { httpOnly: true, secure: true, sameSite: 'none' };
+    // 🛡️ UPDATE: Use policy for secure cookie clearing
+    const cookieOptions = getCookieOptions();
     res.clearCookie('accessToken', cookieOptions);
     res.clearCookie('refreshToken', cookieOptions);
 
