@@ -29,6 +29,14 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  message: { message: "Too many refresh attempts. Please login again." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /* ─────────────────────────────────────────────────────────────────────────────
    PUBLIC ROUTES
    ───────────────────────────────────────────────────────────────────────────── */
@@ -49,7 +57,7 @@ router.post('/register', upload.fields([
 router.post('/login', authLimiter, login);
 
 // 4. Silent Token Refresh (Uses HttpOnly Cookie Rotation)
-router.post('/refresh', refresh);
+router.post('/refresh', refreshLimiter, refresh);
 
 /* ─────────────────────────────────────────────────────────────────────────────
    PROTECTED ROUTES

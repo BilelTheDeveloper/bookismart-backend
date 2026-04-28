@@ -55,6 +55,12 @@ const safeEqual = (a, b) => {
   }
 };
 
+const maskFingerprint = (value) => {
+  if (!value || typeof value !== 'string') return 'n/a';
+  if (value.length <= 12) return `${value.slice(0, 4)}...`;
+  return `${value.slice(0, 6)}...${value.slice(-6)}`;
+};
+
 /**
  * Tracks repeated fingerprint violations for a given user ID.
  */
@@ -182,8 +188,8 @@ export const protect = async (req, res, next) => {
       requestId,
       userId   : decoded.id,
       limitHit,
-      expected : decoded.fingerprint,
-      received : currentFingerprint
+      expected : maskFingerprint(decoded.fingerprint),
+      received : maskFingerprint(currentFingerprint)
     });
 
     if (limitHit) {

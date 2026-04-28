@@ -45,9 +45,8 @@ export const adminGuard = async (req, res, next) => {
     }
 
     /* ── 4. ROLE HIERARCHY ENFORCEMENT ──
-       Only 'admin' and 'owner' bypass this gate. 
-       We use an allowlist approach for maximum security. */
-    const AUTHORIZED_ADMIN_ROLES = ['admin', 'owner'];
+       Admin routes are strictly for admin role only. */
+    const AUTHORIZED_ADMIN_ROLES = ['admin'];
     
     if (!AUTHORIZED_ADMIN_ROLES.includes(user.role)) {
       // 🚨 SECURITY AUDIT: Log the attempt for forensics

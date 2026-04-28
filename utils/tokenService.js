@@ -60,6 +60,14 @@ export const generateAccessAndRefreshTokens = async (user, req, clientHeader) =>
 };
 
 /**
+ * Hash refresh tokens before storing them in DB.
+ * This prevents token replay if database contents are leaked.
+ */
+export const hashRefreshToken = (token) => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+/**
  * 🛡️ THE BINDING VALIDATOR
  * Replaces the old createDeviceFingerprint to match the new architecture
  */

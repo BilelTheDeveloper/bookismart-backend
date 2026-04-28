@@ -148,7 +148,9 @@ const UserSchema = new mongoose.Schema({
 
   // --- 8. ADVANCED SECURITY & TOKEN ROTATION (New Vault) ---
   refreshTokens: [{
-    token: { type: String, required: true },
+    tokenHash: { type: String, required: true },
+    // Legacy fallback for previously stored plaintext tokens (kept for migration safety).
+    token: { type: String },
     deviceId: { type: String, required: true }, // From createDeviceFingerprint
     lastKnownIp: { type: String },
     expiresAt: { type: Date, required: true },

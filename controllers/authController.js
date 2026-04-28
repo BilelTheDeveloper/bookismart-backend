@@ -2,13 +2,24 @@ import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
 import { 
   generateAccessAndRefreshTokens,
-  getCookieOptions // 🛡️ Import the central cookie policy
+  getCookieOptions, // 🛡️ Import the central cookie policy
+  hashRefreshToken
 } from '../utils/tokenService.js';
 import { revokeToken } from '../middleware/authMiddleware.js'; 
 import { validateSignup } from '../validators/authValidator.js';
 import crypto from 'crypto';
 
 const otpStore = new Map();
+
+const safeEqual = (a, b) => {
+  try {
+    const ba = Buffer.from(a || '');
+    const bb = Buffer.from(b || '');
+    return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+};
 
 /**
  * @desc    Send OTP to Terminal for Testing
@@ -129,10 +140,11 @@ export const login = async (req, res) => {
     }
     
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
+    const refreshTokenHash = hashRefreshToken(refreshToken);
 
     user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
     user.refreshTokens.push({
-      token: refreshToken,
+      tokenHash: refreshTokenHash,
       deviceId,
       lastKnownIp: req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress,
       expiresAt: refreshTokenExpiresAt
@@ -173,7 +185,13 @@ export const refresh = async (req, res) => {
   if (!incomingRefreshToken) return res.status(401).json({ success: false, message: "Session expired" });
 
   try {
-    const user = await User.findOne({ "refreshTokens.token": incomingRefreshToken });
+    const incomingRefreshTokenHash = hashRefreshToken(incomingRefreshToken);
+    const user = await User.findOne({
+      $or: [
+        { "refreshTokens.tokenHash": incomingRefreshTokenHash },
+        { "refreshTokens.token": incomingRefreshToken } // legacy fallback
+      ]
+    });
     
     // 🛡️ UPDATE: Use policy for clearing cookies
     const cookieOptions = getCookieOptions();
@@ -182,6 +200,17 @@ export const refresh = async (req, res) => {
         res.clearCookie('refreshToken', cookieOptions);
         res.clearCookie('accessToken', cookieOptions);
         return res.status(403).json({ success: false, message: "Security Alert: Access Revoked" });
+    }
+
+    const matchedStoredToken = user.refreshTokens.find((rt) =>
+      (rt.tokenHash && safeEqual(rt.tokenHash, incomingRefreshTokenHash)) ||
+      (rt.token && safeEqual(rt.token, incomingRefreshToken))
+    );
+
+    if (!matchedStoredToken) {
+      res.clearCookie('refreshToken', cookieOptions);
+      res.clearCookie('accessToken', cookieOptions);
+      return res.status(403).json({ success: false, message: "Could not refresh session" });
     }
 
     const deviceId = req.headers['x-device-fingerprint']; 
@@ -195,9 +224,19 @@ export const refresh = async (req, res) => {
     }
 
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
+    const newRefreshTokenHash = hashRefreshToken(refreshToken);
 
-    user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== incomingRefreshToken);
-    user.refreshTokens.push({ token: refreshToken, deviceId, expiresAt: refreshTokenExpiresAt });
+    user.refreshTokens = user.refreshTokens.filter((rt) => {
+      if (rt.tokenHash) return !safeEqual(rt.tokenHash, incomingRefreshTokenHash);
+      if (rt.token) return !safeEqual(rt.token, incomingRefreshToken);
+      return true;
+    });
+    user.refreshTokens.push({
+      tokenHash: newRefreshTokenHash,
+      deviceId,
+      lastKnownIp: req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress,
+      expiresAt: refreshTokenExpiresAt
+    });
     await user.save();
 
     // 🛡️ UPDATE: Consistently apply policy during rotation
@@ -223,10 +262,20 @@ export const logout = async (req, res) => {
 
     const refreshToken = req.cookies.refreshToken;
     if (refreshToken) {
-        await User.updateOne(
-            { "refreshTokens.token": refreshToken },
-            { $pull: { refreshTokens: { token: refreshToken } } }
-        );
+      const refreshTokenHash = hashRefreshToken(refreshToken);
+      await User.updateOne(
+        { _id: req.user._id },
+        {
+          $pull: {
+            refreshTokens: {
+              $or: [
+                { tokenHash: refreshTokenHash },
+                { token: refreshToken } // legacy fallback
+              ]
+            }
+          }
+        }
+      );
     }
 
     // 🛡️ UPDATE: Use policy for secure cookie clearing
