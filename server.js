@@ -18,7 +18,6 @@ import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js';
 import publicRoutes from './routes/publicRoutes.js';
-import bookingRoutes from './routes/bookingRoutes.js'; // Added Booking Routes
 
 /**
  * 1. DATABASE CONNECTION
@@ -109,7 +108,6 @@ app.use('/api/public', publicRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/merchant/website', websiteRoutes);
-app.use('/api/bookings', bookingRoutes); // Added Booking Route Entry
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
