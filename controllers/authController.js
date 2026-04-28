@@ -142,7 +142,10 @@ export const login = async (req, res) => {
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
     const refreshTokenHash = hashRefreshToken(refreshToken);
 
-    user.refreshTokens = user.refreshTokens.filter(rt => rt.deviceId !== deviceId);
+    user.refreshTokens = user.refreshTokens.filter((rt) => {
+      const hasTokenMaterial = !!rt.tokenHash || !!rt.token;
+      return hasTokenMaterial && rt.deviceId !== deviceId;
+    });
     user.refreshTokens.push({
       tokenHash: refreshTokenHash,
       deviceId,
