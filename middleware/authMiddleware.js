@@ -7,8 +7,10 @@ import { redis } from '../config/redis.js';
    CONSTANTS
    ───────────────────────────────────────────────────────────────────────────── */
 
-/** Only users with this status may pass. Every other status is denied. */
-const ALLOWED_ACCOUNT_STATUSES = ['active'];
+/** * ✅ FIX: Added 'on_boarding' and 'review' to allowed statuses. 
+ * If these aren't here, the user is blocked before they can even see the onboarding page.
+ */
+const ALLOWED_ACCOUNT_STATUSES = ['active', 'on_boarding', 'review'];
 
 /**
  * In-memory fingerprint mismatch tracker.
@@ -141,10 +143,6 @@ export const protect = async (req, res, next) => {
   }
 
   /* ── 5. Strict fingerprint enforcement (timing-safe) ── */
-  /**
-   * UPDATE: We rely on the 'deviceFingerprint' property from the fingerprinter middleware.
-   * If it's missing (due to race condition), we return FINGERPRINT_MISSING.
-   */
   const currentFingerprint = req.deviceFingerprint;
 
   if (!decoded.fingerprint || !currentFingerprint) {
@@ -156,6 +154,7 @@ export const protect = async (req, res, next) => {
     });
   }
 
+  // ✅ Timing-safe comparison of the identity binding
   if (!safeEqual(decoded.fingerprint, currentFingerprint)) {
     /* ── 6. Breach rate limiting ── */
     const limitHit = isBreachLimitExceeded(decoded.id);
@@ -164,6 +163,8 @@ export const protect = async (req, res, next) => {
       requestId,
       userId   : decoded.id,
       limitHit,
+      expected : decoded.fingerprint,
+      received : currentFingerprint
     });
 
     if (limitHit) {
