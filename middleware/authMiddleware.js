@@ -144,6 +144,7 @@ export const protect = async (req, res, next) => {
 
   /* ── 5. Strict fingerprint enforcement (timing-safe) ── */
   const currentFingerprint = req.deviceFingerprint;
+  const currentDeviceHeader = req.headers['x-device-fingerprint'];
 
   if (!decoded.fingerprint || !currentFingerprint) {
     secLog.warn('Identity binding incomplete', { requestId, tokenBound: !!decoded.fingerprint, reqBound: !!currentFingerprint });
@@ -156,6 +157,24 @@ export const protect = async (req, res, next) => {
 
   // ✅ Timing-safe comparison of the identity binding
   if (!safeEqual(decoded.fingerprint, currentFingerprint)) {
+    /**
+     * 🔧 Drift-tolerant fallback:
+     * In some proxy/mobile setups, server-derived anchor parts can drift while the
+     * client device fingerprint header remains stable. If the exact client header
+     * still matches the token-bound client segment, we allow the request.
+     */
+    const tokenClientSegment =
+      typeof decoded.fingerprint === 'string' && decoded.fingerprint.length > 65
+        ? decoded.fingerprint.slice(65)
+        : null;
+
+    if (tokenClientSegment && currentDeviceHeader && safeEqual(tokenClientSegment, currentDeviceHeader)) {
+      secLog.warn('Fingerprint anchor drift tolerated', {
+        requestId,
+        userId: decoded.id,
+      });
+      // Continue as authenticated: same device header is still proven.
+    } else {
     /* ── 6. Breach rate limiting ── */
     const limitHit = isBreachLimitExceeded(decoded.id);
 
@@ -180,6 +199,7 @@ export const protect = async (req, res, next) => {
       message : 'Device mismatch. Security vault has terminated this session.',
       code    : 'FINGERPRINT_MISMATCH',
     });
+    }
   }
 
   /* ── 7. DB freshness check ── */

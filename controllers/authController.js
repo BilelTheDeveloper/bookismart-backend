@@ -154,6 +154,7 @@ export const login = async (req, res) => {
         id: user._id,
         fullName: user.fullName,
         role: user.role,
+        accountStatus: user.accountStatus,
         businessName: user.businessName,
         category: user.category,
       }
