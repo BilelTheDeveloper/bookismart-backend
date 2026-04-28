@@ -91,6 +91,15 @@ export const getCookieOptions = () => {
   };
 };
 
+export const getCsrfCookieOptions = () => {
+  return {
+    httpOnly: false,
+    secure: true,
+    sameSite: 'none',
+    path: '/',
+  };
+};
+
 /**
  * @desc    Validates the Access Token
  */

@@ -1,5 +1,6 @@
 import Website from '../models/Website.js';
 import User from '../models/User.js';
+import { validateWebsitePayload } from '../validators/websiteValidator.js';
 
 /**
  * 🛡️ ADVANCED WEBSITE CONTROLLER (2026 Security Standards)
@@ -70,11 +71,19 @@ export const saveWebsite = async (req, res) => {
 
     // 3. Data Whitelisting (Don't trust the req.body directly)
     // At this stage, image URLs should already be permanent Cloudinary links
+    const { error, value } = validateWebsitePayload(req.body);
+    if (error) {
+      return res.status(400).json({
+        message: "Data validation failed",
+        details: error.details.map((item) => item.message),
+      });
+    }
+
     const { 
       templateId, category, name, slug, 
       hero, about, services, gallery, 
       contact, businessHours 
-    } = req.body;
+    } = value;
 
     // 4. Advanced Slug Sanitization
     const sanitizedSlug = slug 

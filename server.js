@@ -13,6 +13,7 @@ import './config/redis.js';
 
 // Middlewares & Routes
 import { fingerprinter } from './middleware/fingerprint.js';
+import { csrfProtection } from './middleware/csrfProtection.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js';
@@ -88,6 +89,7 @@ app.use((req, res, next) => {
 // 🛡️ COOKIES & IDENTITY
 app.use(cookieParser());
 app.use(fingerprinter);
+app.use(csrfProtection);
 
 // 🛡️ GLOBAL RATE LIMITING
 const limiter = rateLimit({
