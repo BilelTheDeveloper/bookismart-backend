@@ -17,7 +17,8 @@ import { csrfProtection } from './middleware/csrfProtection.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js';
-import publicRoutes from './routes/publicRoutes.js';
+import { publicBookingRouter } from './routes/bookingRoutes.js';
+import { ownerBookingRouter } from './routes/bookingRoutes.js';;
 
 // 📅 BOOKING ROUTES UPDATE
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
@@ -110,7 +111,7 @@ app.use('/api/', limiter);
 // Public facing routes
 app.use('/api/public', publicRoutes);
 app.use('/api/public/booking', publicBookingRouter); // New: Booking Flow
-
+app.use('/api/merchant/bookings', ownerBookingRouter);
 // Auth & Admin
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
