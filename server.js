@@ -19,6 +19,9 @@ import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js';
 import publicRoutes from './routes/publicRoutes.js';
 
+// 📅 BOOKING ROUTES UPDATE
+import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
+
 /**
  * 1. DATABASE CONNECTION
  */
@@ -104,10 +107,17 @@ app.use('/api/', limiter);
 /**
  * 3. ROUTE DEFINITIONS
  */
+// Public facing routes
 app.use('/api/public', publicRoutes);
+app.use('/api/public/booking', publicBookingRouter); // New: Booking Flow
+
+// Auth & Admin
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+
+// Merchant Management
 app.use('/api/merchant/website', websiteRoutes);
+app.use('/api/merchant/bookings', ownerBookingRouter); // New: Dashboard Management
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
@@ -130,7 +140,7 @@ app.get('/', (req, res) => {
  */
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
-  console.error(`[SERVER_ERROR]: ${err.message}`);
+  console.error(`🚨 [SERVER_ERROR]: ${err.message}`);
   res.status(statusCode).json({
     success: false,
     message: err.message,
@@ -160,7 +170,6 @@ function startKeepAlive() {
     return;
   }
 
-  // 🚨 UPDATE: Force HTTPS for the keep-alive ping on production
   const SELF_URL = process.env.RENDER_EXTERNAL_URL || `https://bookismart-backend.onrender.com`;
   const INTERVAL  = 10 * 60 * 1000; // 10 minutes
 
