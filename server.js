@@ -17,10 +17,9 @@ import { csrfProtection } from './middleware/csrfProtection.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js';
-import { publicBookingRouter } from './routes/bookingRoutes.js';
-import { ownerBookingRouter } from './routes/bookingRoutes.js';;
+import publicRoutes from './routes/publicRoutes.js';
 
-// 📅 BOOKING ROUTES UPDATE
+// 📅 BOOKING ROUTES — single import, both routers
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
 
 /**
@@ -56,6 +55,7 @@ app.use(cors({
     'Content-Type',
     'Authorization',
     'x-device-fingerprint',
+    'x-csrf-token',
     'Accept'
   ]
 }));
@@ -110,15 +110,15 @@ app.use('/api/', limiter);
  */
 // Public facing routes
 app.use('/api/public', publicRoutes);
-app.use('/api/public/booking', publicBookingRouter); // New: Booking Flow
-app.use('/api/merchant/bookings', ownerBookingRouter);
+app.use('/api/public/booking', publicBookingRouter);   // Customer booking flow (no auth)
+
 // Auth & Admin
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Merchant Management
 app.use('/api/merchant/website', websiteRoutes);
-app.use('/api/merchant/bookings', ownerBookingRouter); // New: Dashboard Management
+app.use('/api/merchant/bookings', ownerBookingRouter); // Owner dashboard management (auth required)
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
@@ -184,7 +184,7 @@ function startKeepAlive() {
       } else {
         console.warn(`⚠️  Keep-alive got status ${res.statusCode}`);
       }
-      res.resume(); 
+      res.resume();
     });
 
     req.on('error', (err) => {
