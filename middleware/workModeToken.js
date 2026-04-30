@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { logSecurityEvent } from '../utils/securityEventLogger.js';
 
 /**
  * Work Mode invite token verifier.
@@ -31,6 +32,13 @@ export const workModeInviteGuard = async (req, res, next) => {
   const token = bearer || req.query.token || req.body?.token;
   const verified = await verifyWorkModeInvite(token);
   if (!verified) {
+    logSecurityEvent({
+      level: 'SECURITY',
+      msg: 'Invalid work mode invite token used',
+      code: 'WORKMODE_INVITE_INVALID',
+      req,
+      meta: { hasToken: !!token },
+    });
     return res.status(401).json({ success: false, message: 'Invalid or expired work mode link.' });
   }
   req.workMode = verified;

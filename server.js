@@ -27,6 +27,7 @@ import workModeRoutes from './routes/workModeRoutes.js';
 
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import { logSecurityEvent } from './utils/securityEventLogger.js';
 
 /**
  * 1. DATABASE CONNECTION
@@ -106,9 +107,18 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   // Dashboard + realtime apps can generate bursts; keep security but avoid false-positives.
   max: 600,
-  message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res) => {
+    logSecurityEvent({
+      level: 'SECURITY',
+      msg: 'Global rate limit exceeded',
+      code: 'RATE_LIMIT',
+      req,
+      meta: { windowMs: 15 * 60 * 1000, max: 600 },
+    });
+    res.status(429).json({ success: false, message: "Too many requests, please try again later.", code: "RATE_LIMIT" });
+  }
 });
 app.use('/api/', limiter);
 

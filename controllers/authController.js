@@ -11,6 +11,7 @@ import { validateSignup, validateLogin } from '../validators/authValidator.js';
 import crypto from 'crypto';
 import { redis } from '../config/redis.js';
 import { generateCsrfToken } from '../middleware/csrfProtection.js';
+import { logSecurityEvent } from '../utils/securityEventLogger.js';
 
 const otpStore = new Map();
 const OTP_TTL_SECONDS = 10 * 60;
@@ -181,6 +182,13 @@ export const login = async (req, res) => {
     try {
       const locked = await redis.get(lockKey);
       if (locked) {
+        logSecurityEvent({
+          level: 'SECURITY',
+          msg: 'Temporary auth lock hit',
+          code: 'AUTH_TEMP_LOCK',
+          req,
+          meta: { email: normalizedEmail },
+        });
         return res.status(429).json({
           success: false,
           code: 'AUTH_TEMP_LOCK',
@@ -202,6 +210,13 @@ export const login = async (req, res) => {
       } catch {
         // no-op
       }
+      logSecurityEvent({
+        level: 'WARN',
+        msg: 'Login failed: user not found',
+        code: 'LOGIN_FAILED',
+        req,
+        meta: { email: normalizedEmail },
+      });
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
@@ -220,6 +235,14 @@ export const login = async (req, res) => {
       } catch {
         // no-op
       }
+      logSecurityEvent({
+        level: 'WARN',
+        msg: 'Login failed: invalid password',
+        code: 'LOGIN_FAILED',
+        req,
+        userId: user._id,
+        meta: { email: normalizedEmail },
+      });
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 

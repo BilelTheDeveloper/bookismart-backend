@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import crypto from 'crypto';
 import { redis } from '../config/redis.js';
+import { logSecurityEvent } from '../utils/securityEventLogger.js';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    CONSTANTS
@@ -37,9 +38,18 @@ const generateRequestId = () => crypto.randomBytes(8).toString('hex');
  * Structured security logger.
  */
 const secLog = {
-  breach : (msg, meta = {}) => console.error(JSON.stringify({ level: 'SECURITY', msg, ...meta, ts: new Date().toISOString() })),
-  warn   : (msg, meta = {}) => console.warn (JSON.stringify({ level: 'WARN',     msg, ...meta, ts: new Date().toISOString() })),
-  error  : (msg, meta = {}) => console.error(JSON.stringify({ level: 'ERROR',    msg, ...meta, ts: new Date().toISOString() })),
+  breach : (req, msg, meta = {}) => {
+    console.error(JSON.stringify({ level: 'SECURITY', msg, ...meta, ts: new Date().toISOString() }));
+    logSecurityEvent({ level: 'SECURITY', msg, code: meta?.code || '', req, userId: meta?.userId || null, meta });
+  },
+  warn   : (req, msg, meta = {}) => {
+    console.warn(JSON.stringify({ level: 'WARN', msg, ...meta, ts: new Date().toISOString() }));
+    logSecurityEvent({ level: 'WARN', msg, code: meta?.code || '', req, userId: meta?.userId || null, meta });
+  },
+  error  : (req, msg, meta = {}) => {
+    console.error(JSON.stringify({ level: 'ERROR', msg, ...meta, ts: new Date().toISOString() }));
+    logSecurityEvent({ level: 'ERROR', msg, code: meta?.code || '', req, userId: meta?.userId || null, meta });
+  },
 };
 
 /**
@@ -116,7 +126,7 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    secLog.breach('Invalid token presented', { requestId, reason: error.message });
+    secLog.breach(req, 'Invalid token presented', { requestId, reason: error.message, code: 'TOKEN_INVALID' });
     return res.status(401).json({
       success: false,
       message : 'Invalid token',
@@ -132,7 +142,7 @@ export const protect = async (req, res, next) => {
   try {
     const isRevoked = await redis.get(`blacklist:${decoded.jti}`);
     if (isRevoked) {
-      secLog.breach('Revoked token reuse attempt', { requestId, jti: decoded.jti });
+      secLog.breach(req, 'Revoked token reuse attempt', { requestId, jti: decoded.jti, code: 'TOKEN_REVOKED', userId: decoded.id });
       return res.status(401).json({
         success: false,
         message : 'Token has been revoked',
@@ -140,7 +150,7 @@ export const protect = async (req, res, next) => {
       });
     }
   } catch (redisError) {
-    secLog.error('Redis unavailable during jti check', { requestId, error: redisError.message });
+    secLog.error(req, 'Redis unavailable during jti check', { requestId, error: redisError.message, code: 'AUTH_SERVICE_DOWN', userId: decoded?.id });
     return res.status(503).json({
       success: false,
       message : 'Authentication service temporarily unavailable',
@@ -153,7 +163,7 @@ export const protect = async (req, res, next) => {
   const currentDeviceHeader = req.headers['x-device-fingerprint'];
 
   if (!decoded.fingerprint || !currentFingerprint) {
-    secLog.warn('Identity binding incomplete', { requestId, tokenBound: !!decoded.fingerprint, reqBound: !!currentFingerprint });
+    secLog.warn(req, 'Identity binding incomplete', { requestId, tokenBound: !!decoded.fingerprint, reqBound: !!currentFingerprint, code: 'FINGERPRINT_MISSING', userId: decoded?.id });
     return res.status(401).json({
       success: false,
       message : 'Missing identity binding. Handshake incomplete.',
@@ -175,21 +185,23 @@ export const protect = async (req, res, next) => {
         : null;
 
     if (tokenClientSegment && currentDeviceHeader && safeEqual(tokenClientSegment, currentDeviceHeader)) {
-      secLog.warn('Fingerprint anchor drift tolerated', {
+      secLog.warn(req, 'Fingerprint anchor drift tolerated', {
         requestId,
         userId: decoded.id,
+        code: 'FINGERPRINT_DRIFT_TOLERATED'
       });
       // Continue as authenticated: same device header is still proven.
     } else {
     /* ── 6. Breach rate limiting ── */
     const limitHit = isBreachLimitExceeded(decoded.id);
 
-    secLog.breach('Fingerprint mismatch detected', {
+    secLog.breach(req, 'Fingerprint mismatch detected', {
       requestId,
       userId   : decoded.id,
       limitHit,
       expected : maskFingerprint(decoded.fingerprint),
       received : maskFingerprint(currentFingerprint)
+      ,code: limitHit ? 'BREACH_LIMIT_EXCEEDED' : 'FINGERPRINT_MISMATCH'
     });
 
     if (limitHit) {
@@ -213,7 +225,7 @@ export const protect = async (req, res, next) => {
   try {
     user = await User.findById(decoded.id).select('-password -__v');
   } catch (dbError) {
-    secLog.error('DB error during user fetch', { requestId, error: dbError.message });
+    secLog.error(req, 'DB error during user fetch', { requestId, error: dbError.message, code: 'DB_ERROR', userId: decoded?.id });
     return res.status(503).json({ success: false, message: 'Service temporarily unavailable' });
   }
 
@@ -227,10 +239,11 @@ export const protect = async (req, res, next) => {
 
   /* ── 8. Account-status allowlist ── */
   if (!ALLOWED_ACCOUNT_STATUSES.includes(user.accountStatus)) {
-    secLog.warn('Blocked user attempted access', {
+    secLog.warn(req, 'Blocked user attempted access', {
       requestId,
       userId : user._id.toString(),
       status : user.accountStatus,
+      code   : 'ACCOUNT_RESTRICTED'
     });
     return res.status(403).json({
       success: false,
@@ -256,9 +269,10 @@ export const isAdmin = (req, res, next) => {
   }
   if (req.user.role === 'admin') return next();
 
-  secLog.warn('Unauthorized admin access attempt', {
+  secLog.warn(req, 'Unauthorized admin access attempt', {
     requestId : req.requestId,
     userId    : req.user._id.toString(),
+    code      : 'FORBIDDEN'
   });
   return res.status(403).json({
     success: false,
@@ -273,11 +287,12 @@ export const requireRole = (...roles) => (req, res, next) => {
   }
   if (roles.includes(req.user.role)) return next();
 
-  secLog.warn('Unauthorized role access attempt', {
+  secLog.warn(req, 'Unauthorized role access attempt', {
     requestId  : req.requestId,
     userId     : req.user._id.toString(),
     userRole   : req.user.role,
     required   : roles,
+    code       : 'FORBIDDEN'
   });
   return res.status(403).json({
     success: false,
