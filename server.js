@@ -103,7 +103,8 @@ app.use(csrfProtection);
 // 🛡️ GLOBAL RATE LIMITING
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  // Dashboard + realtime apps can generate bursts; keep security but avoid false-positives.
+  max: 600,
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
