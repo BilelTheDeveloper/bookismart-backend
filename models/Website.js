@@ -45,6 +45,7 @@ const WebsiteSchema = new mongoose.Schema({
     title: { type: String, required: true },
     description: { type: String },
     price: { type: String }, // String to allow "Starting at 20 TND" or "Free"
+    duration: { type: Number, default: 30, min: 5, max: 480 }, // Minutes
     active: { type: Boolean, default: true }
   }],
 

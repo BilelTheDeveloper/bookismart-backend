@@ -21,6 +21,7 @@ import publicRoutes from './routes/publicRoutes.js';
 
 // 📅 BOOKING ROUTES — single import, both routers
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
+import { ownerConsultationRouter, moderatorConsultationRouter } from './routes/consultationRoutes.js';
 
 /**
  * 1. DATABASE CONNECTION
@@ -119,6 +120,8 @@ app.use('/api/admin', adminRoutes);
 // Merchant Management
 app.use('/api/merchant/website', websiteRoutes);
 app.use('/api/merchant/bookings', ownerBookingRouter); // Owner dashboard management (auth required)
+app.use('/api/merchant/consultations', ownerConsultationRouter);
+app.use('/api/moderator/consultations', moderatorConsultationRouter);
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {

@@ -4,6 +4,7 @@ const serviceSchema = Joi.object({
   title: Joi.string().trim().min(1).max(120).required(),
   description: Joi.string().allow('').max(500),
   price: Joi.string().allow('').max(64),
+  duration: Joi.number().integer().min(5).max(480).default(30),
   active: Joi.boolean().default(true),
 });
 
