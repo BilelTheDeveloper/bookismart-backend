@@ -23,6 +23,7 @@ import publicRoutes from './routes/publicRoutes.js';
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
 import { ownerConsultationRouter } from './routes/consultationRoutes.js';
 import merchantInsightsRoutes from './routes/merchantInsightsRoutes.js';
+import workModeRoutes from './routes/workModeRoutes.js';
 
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -127,6 +128,7 @@ app.use('/api/merchant/website', websiteRoutes);
 app.use('/api/merchant/bookings', ownerBookingRouter); // Owner dashboard management (auth required)
 app.use('/api/merchant/consultations', ownerConsultationRouter);
 app.use('/api/merchant/insights', merchantInsightsRoutes);
+app.use('/api/work-mode', workModeRoutes);
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
@@ -179,11 +181,54 @@ const io = new SocketIOServer(httpServer, {
 app.set('io', io);
 
 io.on('connection', (socket) => {
+  // Optional Work Mode capability token (no login flow)
+  // The client can pass `auth: { workModeToken }` in io() options.
+  socket.data.workMode = null;
+  const token = socket.handshake?.auth?.workModeToken;
+  if (typeof token === 'string' && token.length > 10) {
+    // Lazy import to avoid circular deps (middleware uses models)
+    import('./middleware/workModeToken.js')
+      .then(({ verifyWorkModeInvite }) => verifyWorkModeInvite(token))
+      .then((verified) => {
+        if (verified) socket.data.workMode = verified;
+      })
+      .catch(() => {});
+  }
+
   socket.on('join', ({ room }) => {
     if (typeof room === 'string' && room.length < 200) socket.join(room);
   });
   socket.on('leave', ({ room }) => {
     if (typeof room === 'string' && room.length < 200) socket.leave(room);
+  });
+
+  // Worker can send messages via socket without custom headers (avoids CORS preflight).
+  socket.on('workmode:message', async ({ consultationId, text }) => {
+    try {
+      if (!socket.data.workMode?.ownerId) return;
+      if (!consultationId || typeof consultationId !== 'string') return;
+      if (!text || typeof text !== 'string' || !text.trim()) return;
+
+      const { default: Consultation } = await import('./models/Consultation.js');
+      const c = await Consultation.findOne({ _id: consultationId, ownerId: socket.data.workMode.ownerId });
+      if (!c) return;
+
+      c.messages.push({
+        senderRole: 'worker',
+        // Worker is capability-based; store ownerId as senderId for now.
+        senderId: socket.data.workMode.ownerId,
+        text: text.trim(),
+      });
+      c.lastActivityAt = new Date();
+      await c.save();
+
+      io.to(`consultation:${consultationId}`).emit('consultation:message', {
+        consultationId: String(c._id),
+        message: c.messages[c.messages.length - 1],
+      });
+    } catch {
+      // no-op
+    }
   });
 });
 

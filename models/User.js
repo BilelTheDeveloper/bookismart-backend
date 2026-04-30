@@ -157,6 +157,10 @@ const UserSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
   }],
 
+  // --- 9. WORK MODE: Worker invite link rotation ---
+  // The owner can rotate this nonce to instantly invalidate old worker links.
+  workModeInviteNonce: { type: Number, default: 0 },
+
 }, { 
   timestamps: true 
 });
