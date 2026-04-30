@@ -72,23 +72,13 @@ export const getOwnerConsultations = async (req, res) => {
   }
 };
 
-export const getModeratorConsultations = async (req, res) => {
+const emitConsultationEvent = (req, consultationId, event, payload) => {
   try {
-    const status = req.query.status || 'active';
-    const filter = {};
-    if (status === 'active') filter.status = { $in: ACTIVE_STATUSES };
-    else if (status !== 'all') filter.status = status;
-
-    const data = await Consultation.find(filter)
-      .populate('ownerId', 'fullName businessName ville')
-      .populate('moderatorId', 'fullName role')
-      .sort({ updatedAt: -1 })
-      .limit(120);
-
-    return res.status(200).json({ success: true, data });
-  } catch (error) {
-    console.error(`[CONSULTATION_MODERATOR_LIST_ERROR] ${error.message}`);
-    return res.status(500).json({ success: false, message: 'Failed to load moderator queue.' });
+    const io = req.app?.get?.('io');
+    if (!io) return;
+    io.to(`consultation:${consultationId}`).emit(event, payload);
+  } catch {
+    // no-op: sockets are best-effort
   }
 };
 
@@ -138,20 +128,27 @@ export const addConsultationMessage = async (req, res) => {
     }
 
     const isOwner = user.role === 'owner' && String(consultation.ownerId) === String(user._id);
-    const isModerator = ['admin', 'moderator'].includes(user.role);
-    if (!isOwner && !isModerator) {
+    // Work Mode: allow owner to send as 'worker' via trusted UI header
+    const workModeRole = String(req.headers['x-work-mode-role'] || '').toLowerCase();
+    const isWorkerMode = isOwner && workModeRole === 'worker';
+
+    const isAdmin = user.role === 'admin';
+    if (!isOwner && !isAdmin) {
       return res.status(403).json({ success: false, message: 'Not allowed for this consultation.' });
     }
 
-    if (isModerator && !consultation.moderatorId) consultation.moderatorId = user._id;
-
     consultation.messages.push({
-      senderRole: isOwner ? 'owner' : 'moderator',
+      senderRole: isWorkerMode ? 'worker' : (isOwner ? 'owner' : 'worker'),
       senderId: user._id,
       text: text.trim(),
     });
     consultation.lastActivityAt = new Date();
     await consultation.save();
+
+    emitConsultationEvent(req, consultation._id, 'consultation:message', {
+      consultationId: String(consultation._id),
+      message: consultation.messages[consultation.messages.length - 1],
+    });
 
     return res.status(200).json({ success: true, data: consultation });
   } catch (error) {
@@ -179,6 +176,12 @@ export const completeConsultation = async (req, res) => {
     await consultation.save();
 
     await Booking.findByIdAndUpdate(consultation.bookingId, { status: 'completed', notes: consultation.ownerNotes || '' });
+
+    emitConsultationEvent(req, consultation._id, 'consultation:done', {
+      consultationId: String(consultation._id),
+      ownerNotes: consultation.ownerNotes,
+      endedAt: consultation.endedAt,
+    });
 
     return res.status(200).json({ success: true, data: consultation });
   } catch (error) {

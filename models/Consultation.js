@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 
 const ConsultationMessageSchema = new mongoose.Schema(
   {
-    senderRole: { type: String, enum: ['owner', 'moderator'], required: true },
+    // Back-compat: keep 'moderator' for existing records, but new UI uses 'worker'
+    senderRole: { type: String, enum: ['owner', 'worker', 'moderator'], required: true },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     text: { type: String, required: true, trim: true, maxlength: 1500 },
   },
@@ -36,6 +37,7 @@ const ConsultationSchema = new mongoose.Schema(
     remainingSeconds: { type: Number, required: true, min: 0 },
 
     ownerNotes: { type: String, default: '', maxlength: 1000 },
+    // Back-compat: previously used for moderator notes; now mapped to worker notes
     moderatorNotes: { type: String, default: '', maxlength: 1000 },
     completionSummary: { type: String, default: '', maxlength: 1200 },
 

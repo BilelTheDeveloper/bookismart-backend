@@ -21,7 +21,11 @@ import publicRoutes from './routes/publicRoutes.js';
 
 // 📅 BOOKING ROUTES — single import, both routers
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
-import { ownerConsultationRouter, moderatorConsultationRouter } from './routes/consultationRoutes.js';
+import { ownerConsultationRouter } from './routes/consultationRoutes.js';
+import merchantInsightsRoutes from './routes/merchantInsightsRoutes.js';
+
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 
 /**
  * 1. DATABASE CONNECTION
@@ -121,7 +125,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/merchant/website', websiteRoutes);
 app.use('/api/merchant/bookings', ownerBookingRouter); // Owner dashboard management (auth required)
 app.use('/api/merchant/consultations', ownerConsultationRouter);
-app.use('/api/moderator/consultations', moderatorConsultationRouter);
+app.use('/api/merchant/insights', merchantInsightsRoutes);
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
@@ -156,7 +160,33 @@ app.use((err, req, res, next) => {
  * 5. SERVER START
  */
 const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
+const httpServer = createServer(app);
+
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: [
+      "https://bookiify.vercel.app",
+      "http://localhost:5173",
+      process.env.CLIENT_URL
+    ].filter(Boolean),
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
+});
+
+// Allow controllers to emit events without circular imports
+app.set('io', io);
+
+io.on('connection', (socket) => {
+  socket.on('join', ({ room }) => {
+    if (typeof room === 'string' && room.length < 200) socket.join(room);
+  });
+  socket.on('leave', ({ room }) => {
+    if (typeof room === 'string' && room.length < 200) socket.leave(room);
+  });
+});
+
+const server = httpServer.listen(PORT, () => {
   console.log(`🚀 System Online: Port ${PORT}`);
   console.log(`🔒 Security: Enterprise Redis Blacklist Active`);
   console.log(`📡 Identity: Device Fingerprinting Gateway Live`);

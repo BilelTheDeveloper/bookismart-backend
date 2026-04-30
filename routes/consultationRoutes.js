@@ -3,7 +3,6 @@ import { protect, requireRole } from '../middleware/authMiddleware.js';
 import {
   startConsultationFromBooking,
   getOwnerConsultations,
-  getModeratorConsultations,
   updateConsultationTimer,
   addConsultationMessage,
   completeConsultation,
@@ -18,10 +17,4 @@ ownerConsultationRouter.post('/from-booking/:bookingId', startConsultationFromBo
 ownerConsultationRouter.patch('/:consultationId/timer', updateConsultationTimer);
 ownerConsultationRouter.patch('/:consultationId/complete', completeConsultation);
 ownerConsultationRouter.post('/:consultationId/messages', addConsultationMessage);
-
-const moderatorConsultationRouter = express.Router();
-moderatorConsultationRouter.use(protect, requireRole('admin', 'moderator'));
-moderatorConsultationRouter.get('/', getModeratorConsultations);
-moderatorConsultationRouter.post('/:consultationId/messages', addConsultationMessage);
-
-export { ownerConsultationRouter, moderatorConsultationRouter };
+export { ownerConsultationRouter };
