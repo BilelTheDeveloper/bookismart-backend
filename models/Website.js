@@ -77,7 +77,24 @@ const WebsiteSchema = new mongoose.Schema({
     isClosed: { type: Boolean, default: false } // For "Closed on Sundays"
   }],
 
-  // --- 8. STATUS & VERIFICATION ---
+  // --- 8. BOOKING & LOCALIZATION SETTINGS ---
+  setupConfig: {
+    maxCustomersPerDay: { type: Number, default: 25, min: 1, max: 500 },
+    restMinutesBetweenConsultations: { type: Number, default: 0, min: 0, max: 180 },
+    pauseWindows: [{
+      label: { type: String, default: "Pause", trim: true },
+      start: { type: String, default: "12:00" },
+      end: { type: String, default: "13:00" }
+    }],
+    localization: {
+      country: { type: String, default: "", trim: true },
+      city: { type: String, default: "", trim: true },
+      address: { type: String, default: "", trim: true },
+      timezone: { type: String, default: "UTC" }
+    }
+  },
+
+  // --- 9. STATUS & VERIFICATION ---
   isPublished: { type: Boolean, default: false },
   verificationStatus: { 
     type: String, 

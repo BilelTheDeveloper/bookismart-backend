@@ -82,7 +82,7 @@ export const saveWebsite = async (req, res) => {
     const { 
       templateId, category, name, slug, 
       hero, about, services, gallery, 
-      contact, businessHours 
+      contact, businessHours, setupConfig
     } = value;
 
     // 4. Advanced Slug Sanitization
@@ -113,6 +113,7 @@ export const saveWebsite = async (req, res) => {
       gallery,
       contact,
       businessHours,
+      setupConfig,
       lastUpdated: Date.now(),
       // Reset verification status if the user changes their name or slug
       verificationStatus: 'pending' 

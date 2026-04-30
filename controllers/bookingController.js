@@ -29,6 +29,30 @@ const generateTimeSlots = (openTime, closeTime, durationMinutes = 30) => {
 const getDayName = (date) =>
   new Date(date).toLocaleDateString('en-US', { weekday: 'long' });
 
+const toMinutes = (hhmm = '00:00') => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return (h * 60) + m;
+};
+
+const hasIntervalConflict = ({ candidateStart, candidateEnd, existingStart, existingDuration, restMinutes }) => {
+  const existingEnd = existingStart + existingDuration;
+  const existingEndWithRest = existingEnd + restMinutes;
+  const candidateEndWithRest = candidateEnd + restMinutes;
+
+  const candidateBeforeExisting = candidateEndWithRest <= existingStart;
+  const existingBeforeCandidate = existingEndWithRest <= candidateStart;
+
+  return !(candidateBeforeExisting || existingBeforeCandidate);
+};
+
+const isInPauseWindow = ({ candidateStart, candidateEnd, pauseWindows }) => {
+  return pauseWindows.some((pause) => {
+    const pauseStart = toMinutes(pause.start);
+    const pauseEnd = toMinutes(pause.end);
+    return candidateStart < pauseEnd && candidateEnd > pauseStart;
+  });
+};
+
 /* ─────────────────────────────────────────────────────────────────────────────
    1. GET MERCHANT BOOKING INFO (Services + Business Hours)
    @route  GET /api/public/booking/:merchantId
@@ -65,6 +89,7 @@ export const getBookingInfo = async (req, res) => {
         slug: website.slug,
         services: activeServices,
         businessHours: website.businessHours || [],
+        setupConfig: website.setupConfig || {},
         contact: website.contact || {},
       },
     });
@@ -114,6 +139,10 @@ export const getAvailableSlots = async (req, res) => {
     }
 
     const serviceDuration = parseInt(duration) || 30;
+    const setupConfig = website.setupConfig || {};
+    const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
+    const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
+    const pauseWindows = (setupConfig.pauseWindows || []).filter((p) => p?.start && p?.end && p.start < p.end);
     const allSlots = generateTimeSlots(dayConfig.open, dayConfig.close, serviceDuration);
 
     // When rescheduling, exclude the current booking so its slot appears free
@@ -126,13 +155,34 @@ export const getAvailableSlots = async (req, res) => {
       bookingFilter._id = { $ne: excludeBookingId };
     }
 
-    const bookedSlots = await Booking.find(bookingFilter).select('timeSlot');
-    const takenTimes = new Set(bookedSlots.map((b) => b.timeSlot));
+    const bookedSlots = await Booking.find(bookingFilter).select('timeSlot service.duration');
+    const isFullyBookedByLimit = bookedSlots.length >= maxCustomersPerDay;
 
-    const slots = allSlots.map((time) => ({
-      time,
-      available: !takenTimes.has(time),
-    }));
+    const slots = allSlots.map((time) => {
+      const candidateStart = toMinutes(time);
+      const candidateEnd = candidateStart + serviceDuration;
+
+      if (isInPauseWindow({ candidateStart, candidateEnd, pauseWindows })) {
+        return { time, available: false };
+      }
+
+      const hasConflict = bookedSlots.some((booking) => {
+        const existingStart = toMinutes(booking.timeSlot);
+        const existingDuration = parseInt(booking?.service?.duration) || 30;
+        return hasIntervalConflict({
+          candidateStart,
+          candidateEnd,
+          existingStart,
+          existingDuration,
+          restMinutes,
+        });
+      });
+
+      return {
+        time,
+        available: !isFullyBookedByLimit && !hasConflict,
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -140,6 +190,7 @@ export const getAvailableSlots = async (req, res) => {
         date,
         dayName,
         isClosed: false,
+        isFullyBookedByLimit,
         open: dayConfig.open,
         close: dayConfig.close,
         slots,
@@ -195,6 +246,10 @@ export const createBooking = async (req, res) => {
     }
 
     const website = await Website.findOne({ ownerId: merchantId });
+    const setupConfig = website?.setupConfig || {};
+    const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
+    const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
+    const pauseWindows = (setupConfig.pauseWindows || []).filter((p) => p?.start && p?.end && p.start < p.end);
     const dayName = getDayName(date);
     const dayConfig = website?.businessHours?.find((d) => d.day === dayName);
 
@@ -206,6 +261,50 @@ export const createBooking = async (req, res) => {
     }
 
     const appointmentDate = new Date(`${date}T${timeSlot}:00`);
+    const serviceDuration = parseInt(service?.duration) || 30;
+    const candidateStart = toMinutes(timeSlot);
+    const candidateEnd = candidateStart + serviceDuration;
+
+    if (isInPauseWindow({ candidateStart, candidateEnd, pauseWindows })) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected time falls inside a configured pause window.',
+      });
+    }
+
+    const activeBookings = await Booking.find({
+      ownerId: merchantId,
+      dateString: date,
+      status: { $in: ['pending', 'confirmed'] },
+    }).select('timeSlot service.duration');
+
+    if (activeBookings.length >= maxCustomersPerDay) {
+      return res.status(409).json({
+        success: false,
+        message: 'Maximum number of customers reached for this day.',
+        code: 'DAILY_LIMIT_REACHED',
+      });
+    }
+
+    const overlapsExisting = activeBookings.some((existingBooking) => {
+      const existingStart = toMinutes(existingBooking.timeSlot);
+      const existingDuration = parseInt(existingBooking?.service?.duration) || 30;
+      return hasIntervalConflict({
+        candidateStart,
+        candidateEnd,
+        existingStart,
+        existingDuration,
+        restMinutes,
+      });
+    });
+
+    if (overlapsExisting) {
+      return res.status(409).json({
+        success: false,
+        message: 'This slot conflicts with another appointment or required rest time.',
+        code: 'SLOT_CONFLICT',
+      });
+    }
 
     const booking = await Booking.create({
       ownerId: merchantId,
@@ -216,7 +315,7 @@ export const createBooking = async (req, res) => {
       service: {
         title: service.title,
         price: service.price || 'N/A',
-        duration: service.duration || 30,
+        duration: serviceDuration,
       },
       appointmentDate,
       dateString: date,
@@ -432,12 +531,62 @@ export const rescheduleBooking = async (req, res) => {
 
     // 5. Verify business is open on the new day
     const website = await Website.findOne({ ownerId });
+    const setupConfig = website?.setupConfig || {};
+    const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
+    const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
+    const pauseWindows = (setupConfig.pauseWindows || []).filter((p) => p?.start && p?.end && p.start < p.end);
     const dayName = getDayName(date);
     const dayConfig = website?.businessHours?.find((d) => d.day === dayName);
     if (!dayConfig || dayConfig.isClosed) {
       return res.status(400).json({
         success: false,
         message: `Business is closed on ${dayName}.`,
+      });
+    }
+
+    const serviceDuration = parseInt(booking?.service?.duration) || 30;
+    const candidateStart = toMinutes(timeSlot);
+    const candidateEnd = candidateStart + serviceDuration;
+
+    if (isInPauseWindow({ candidateStart, candidateEnd, pauseWindows })) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected time falls inside a configured pause window.',
+      });
+    }
+
+    const activeBookings = await Booking.find({
+      ownerId,
+      dateString: date,
+      status: { $in: ['pending', 'confirmed'] },
+      _id: { $ne: bookingId },
+    }).select('timeSlot service.duration');
+
+    if (activeBookings.length >= maxCustomersPerDay) {
+      return res.status(409).json({
+        success: false,
+        message: 'Maximum number of customers reached for this day.',
+        code: 'DAILY_LIMIT_REACHED',
+      });
+    }
+
+    const overlapsExisting = activeBookings.some((existingBooking) => {
+      const existingStart = toMinutes(existingBooking.timeSlot);
+      const existingDuration = parseInt(existingBooking?.service?.duration) || 30;
+      return hasIntervalConflict({
+        candidateStart,
+        candidateEnd,
+        existingStart,
+        existingDuration,
+        restMinutes,
+      });
+    });
+
+    if (overlapsExisting) {
+      return res.status(409).json({
+        success: false,
+        message: 'That time conflicts with another appointment or rest requirement.',
+        code: 'SLOT_CONFLICT',
       });
     }
 

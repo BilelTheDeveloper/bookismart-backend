@@ -14,6 +14,12 @@ const businessHourSchema = Joi.object({
   isClosed: Joi.boolean().default(false),
 });
 
+const pauseWindowSchema = Joi.object({
+  label: Joi.string().trim().allow('').max(80),
+  start: Joi.string().pattern(/^\d{2}:\d{2}$/).required(),
+  end: Joi.string().pattern(/^\d{2}:\d{2}$/).required(),
+});
+
 export const validateWebsitePayload = (data) => {
   const schema = Joi.object({
     templateId: Joi.string().trim().min(3).max(64).required(),
@@ -47,6 +53,22 @@ export const validateWebsitePayload = (data) => {
       }).required(),
     }).required(),
     businessHours: Joi.array().items(businessHourSchema).max(7).required(),
+    setupConfig: Joi.object({
+      maxCustomersPerDay: Joi.number().integer().min(1).max(500).default(25),
+      restMinutesBetweenConsultations: Joi.number().integer().min(0).max(180).default(0),
+      pauseWindows: Joi.array().items(pauseWindowSchema).max(8).default([]),
+      localization: Joi.object({
+        country: Joi.string().allow('').max(80),
+        city: Joi.string().allow('').max(80),
+        address: Joi.string().allow('').max(250),
+        timezone: Joi.string().allow('').max(80),
+      }).default({ country: '', city: '', address: '', timezone: 'UTC' }),
+    }).default({
+      maxCustomersPerDay: 25,
+      restMinutesBetweenConsultations: 0,
+      pauseWindows: [],
+      localization: { country: '', city: '', address: '', timezone: 'UTC' },
+    }),
   });
 
   return schema.validate(data, { abortEarly: false, stripUnknown: true });
