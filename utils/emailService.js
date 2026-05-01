@@ -16,6 +16,23 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+export const sendEmail = async ({ to, subject, html, text, attachments = [] }) => {
+  const mailOptions = {
+    from: `"Bookiify" <${process.env.EMAIL_USER}>`,
+    to,
+    subject,
+    html,
+    text,
+    attachments,
+  };
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
 /**
  * Core Logic: Generates and sends a branded status email.
  */

@@ -18,6 +18,7 @@ import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js';
 import publicRoutes from './routes/publicRoutes.js';
+import calendarRoutes from './routes/calendarRoutes.js';
 
 // 📅 BOOKING ROUTES — single import, both routers
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
@@ -28,6 +29,7 @@ import workModeRoutes from './routes/workModeRoutes.js';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { logSecurityEvent } from './utils/securityEventLogger.js';
+import { startReminderScheduler } from './utils/reminderScheduler.js';
 
 /**
  * 1. DATABASE CONNECTION
@@ -128,6 +130,7 @@ app.use('/api/', limiter);
 // Public facing routes
 app.use('/api/public', publicRoutes);
 app.use('/api/public/booking', publicBookingRouter);   // Customer booking flow (no auth)
+app.use('/api/public/calendar', calendarRoutes);
 
 // Auth & Admin
 app.use('/api/auth', authRoutes);
@@ -249,6 +252,7 @@ const server = httpServer.listen(PORT, () => {
 
   // Start keep-alive after server is ready
   startKeepAlive();
+  startReminderScheduler();
 });
 
 /**

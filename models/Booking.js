@@ -66,6 +66,15 @@ const BookingSchema = new mongoose.Schema({
     type: String,
     maxLength: 500
   },
+
+  // 7. AUTOMATION & LINKS (Reminders / Reviews / Waitlist)
+  reminder24hSentAt: { type: Date, default: null },
+  reminder2hSentAt: { type: Date, default: null },
+  reminderLastError: { type: String, default: '' },
+
+  reviewToken: { type: String, default: '', index: true },
+  reviewInviteSentAt: { type: Date, default: null },
+  reviewSubmittedAt: { type: Date, default: null },
   
   // 6. METADATA
   createdAt: {
