@@ -29,6 +29,12 @@ import financeRoutes from './routes/financeRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import loyaltyRoutes from './routes/loyaltyRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
+import {
+  publicCustomerRouter,
+  portalCustomerRouter,
+  ownerCustomerRouter,
+  adminCustomerRouter,
+} from './routes/customerRoutes.js';
 
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -155,6 +161,12 @@ app.use('/api/merchant/invoices', invoiceRoutes);
 app.use('/api/merchant/loyalty', loyaltyRoutes);
 app.use('/api/merchant/settings', settingsRoutes);
 app.use('/api/work-mode', workModeRoutes);
+
+// Customer Portal
+app.use('/api/customer',           publicCustomerRouter);
+app.use('/api/customer',           portalCustomerRouter);
+app.use('/api/merchant/customers', ownerCustomerRouter);
+app.use('/api/admin/customers',    adminCustomerRouter);
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
