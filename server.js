@@ -51,18 +51,13 @@ app.set('trust proxy', 1);
 /**
  * 2. SECURITY HARDENING & CORS
  */
-// 🚨 UPDATE: Configured Helmet to allow Cross-Origin Resource Sharing for cookies
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-
-app.use(cors({
+const corsOptions = {
   origin: [
     "https://bookiify.vercel.app",
     "http://localhost:5173",
     process.env.CLIENT_URL
   ].filter(Boolean),
-  credentials: true, // Required for HttpOnly cookies
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -71,7 +66,17 @@ app.use(cors({
     'x-csrf-token',
     'Accept'
   ]
+};
+
+// Answer ALL preflight requests immediately — before CSRF, fingerprint,
+// rate-limit, or any other middleware can reject them.
+app.options('*', cors(corsOptions));
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
+
+app.use(cors(corsOptions));
 
 // 🛡️ DATA PARSING
 app.use(express.json({ limit: '10mb' }));
