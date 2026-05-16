@@ -277,7 +277,7 @@ function startKeepAlive() {
     return;
   }
 
-  const SELF_URL = process.env.RENDER_EXTERNAL_URL || `https://bookismart-backend.onrender.com`;
+  const SELF_URL = process.env.RENDER_EXTERNAL_URL || `https://bookismart-backend-kcnn.onrender.com`;
   const INTERVAL  = 10 * 60 * 1000; // 10 minutes
 
   const ping = () => {
