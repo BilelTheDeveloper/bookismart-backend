@@ -22,7 +22,7 @@ import calendarRoutes from './routes/calendarRoutes.js';
 
 // 📅 BOOKING ROUTES — single import, both routers
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
-import { ownerConsultationRouter } from './routes/consultationRoutes.js';
+import { ownerConsultationRouter, customerConsultationRouter } from './routes/consultationRoutes.js';
 import merchantInsightsRoutes from './routes/merchantInsightsRoutes.js';
 import workModeRoutes from './routes/workModeRoutes.js';
 import financeRoutes from './routes/financeRoutes.js';
@@ -42,6 +42,8 @@ import {
 } from './routes/recruitmentRoutes.js';
 import staffRoutes        from './routes/staffRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import searchRoutes       from './routes/searchRoutes.js';
+import customerNoteRoutes from './routes/customerNoteRoutes.js';
 import chatRoutes         from './routes/chatRoutes.js';
 import paymentRoutes      from './routes/paymentRoutes.js';
 
@@ -189,6 +191,9 @@ app.use('/api/admin/recruitment',     adminRecruitmentRouter);
 app.use('/api/merchant/staff',         staffRoutes);
 app.use('/api/merchant/notifications', notificationRoutes);
 app.use('/api/merchant/chat',          chatRoutes);
+app.use('/api/merchant/search',        searchRoutes);
+app.use('/api/merchant/notes',         customerNoteRoutes);
+app.use('/api/customer/consultation',  customerConsultationRouter);
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {

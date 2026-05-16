@@ -809,3 +809,56 @@ export const rescheduleBooking = async (req, res) => {
     res.status(500).json({ success: false, message: 'Reschedule failed.' });
   }
 };
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   8. SEND REVIEW REQUEST (Owner Dashboard)
+   @route  POST /api/merchant/bookings/:bookingId/review-request
+   @access Private
+   ───────────────────────────────────────────────────────────────────────────── */
+export const sendReviewRequest = async (req, res) => {
+  try {
+    const ownerId  = req.user._id;
+    const { bookingId } = req.params;
+
+    const booking = await Booking.findOne({ _id: bookingId, ownerId, status: 'completed' });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Completed booking not found.' });
+    }
+
+    const owner = await User.findById(ownerId).select('businessName fullName');
+    const businessName = owner?.businessName || owner?.fullName || 'Your service provider';
+
+    await sendEmail({
+      to: booking.customerEmail,
+      subject: `How was your experience at ${businessName}? ⭐`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#f8fafc;padding:32px;border-radius:20px">
+          <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:16px;padding:28px;text-align:center;margin-bottom:24px">
+            <h1 style="color:#fff;margin:0;font-size:26px;font-weight:900">How Was Your Visit?</h1>
+            <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;font-size:14px">Share your experience with ${businessName}</p>
+          </div>
+          <p style="color:#475569;font-size:15px;line-height:1.6">Hi <strong>${booking.customerName}</strong>,</p>
+          <p style="color:#475569;font-size:15px;line-height:1.6">
+            Thank you for your recent appointment on <strong>${booking.dateString}</strong>.
+            We'd love to hear your feedback — it helps us improve and helps others find great service.
+          </p>
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:20px 0;text-align:center">
+            <p style="color:#1e293b;font-weight:700;margin:0 0 4px;font-size:16px">
+              ${booking.service?.title || 'Your appointment'}
+            </p>
+            <p style="color:#94a3b8;font-size:13px;margin:0">at ${businessName}</p>
+          </div>
+          <p style="color:#475569;font-size:14px;text-align:center;margin-top:24px">⭐ Rate 1–5 stars and leave a note. Every review matters.</p>
+          <p style="color:#94a3b8;font-size:12px;text-align:center;margin-top:32px">
+            This review request was sent by ${businessName} via Bookiify.
+          </p>
+        </div>
+      `,
+    });
+
+    res.status(200).json({ success: true, message: 'Review request sent.' });
+  } catch (err) {
+    console.error('[REVIEW_REQUEST_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Failed to send review request.' });
+  }
+};

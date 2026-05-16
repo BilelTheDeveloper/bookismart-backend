@@ -7,6 +7,7 @@ import {
   getBookingDetail,
   updateBookingStatus,
   rescheduleBooking,
+  sendReviewRequest,
 } from '../controllers/bookingController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -47,5 +48,8 @@ ownerBookingRouter.patch('/:bookingId/status', protect, updateBookingStatus);
 
 // PATCH  /api/merchant/bookings/:bookingId/reschedule    → Reschedule to new date+time
 ownerBookingRouter.patch('/:bookingId/reschedule', protect, rescheduleBooking);
+
+// POST   /api/merchant/bookings/:bookingId/review-request → Email customer a review request
+ownerBookingRouter.post('/:bookingId/review-request', protect, sendReviewRequest);
 
 export { ownerBookingRouter };

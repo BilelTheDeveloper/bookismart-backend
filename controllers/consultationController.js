@@ -1,5 +1,6 @@
 import Booking from '../models/Booking.js';
 import Consultation from '../models/Consultation.js';
+import { saveCheckpoint } from './customerNoteController.js';
 
 const ACTIVE_STATUSES = ['waiting', 'in_progress'];
 
@@ -168,14 +169,28 @@ export const completeConsultation = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Consultation not found.' });
     }
 
+    const { checkpointSummary, nextAction } = req.body;
+
     consultation.status = 'done';
     consultation.ownerNotes = (ownerNotes || '').trim();
-    consultation.completionSummary = (completionSummary || '').trim();
+    consultation.completionSummary = (completionSummary || checkpointSummary || '').trim();
     consultation.endedAt = new Date();
     consultation.lastActivityAt = new Date();
     await consultation.save();
 
     await Booking.findByIdAndUpdate(consultation.bookingId, { status: 'completed', notes: consultation.ownerNotes || '' });
+
+    // Auto-save checkpoint to CustomerNote
+    saveCheckpoint(ownerId, {
+      email:          consultation.customerEmail,
+      phone:          consultation.customerPhone,
+      name:           consultation.customerName,
+      consultationId: consultation._id,
+      date:           consultation.dateString,
+      service:        consultation.serviceTitle,
+      summary:        consultation.completionSummary,
+      nextAction:     (nextAction || '').trim(),
+    }).catch(() => {});
 
     emitConsultationEvent(req, consultation._id, 'consultation:done', {
       consultationId: String(consultation._id),
@@ -183,10 +198,90 @@ export const completeConsultation = async (req, res) => {
       endedAt: consultation.endedAt,
     });
 
+    // Notify next waiting consultation that it's almost their turn
+    try {
+      const nextWaiting = await Consultation.findOne({
+        ownerId, status: 'waiting',
+        createdAt: { $gt: consultation.startedAt || consultation.createdAt },
+      }).sort({ createdAt: 1 });
+
+      if (nextWaiting) {
+        emitConsultationEvent(req, nextWaiting._id, 'consultation:nextUp', {
+          consultationId: String(nextWaiting._id),
+          message: 'Your session is about to start — please get ready!',
+        });
+      }
+    } catch {}
+
     return res.status(200).json({ success: true, data: consultation });
   } catch (error) {
     console.error(`[CONSULTATION_COMPLETE_ERROR] ${error.message}`);
     return res.status(500).json({ success: false, message: 'Failed to complete consultation.' });
+  }
+};
+
+/* ── Queue endpoint: ordered active consultations with position numbers ── */
+export const getConsultationQueue = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const data = await Consultation.find({
+      ownerId,
+      status: { $in: ['waiting', 'in_progress'] },
+    }).sort({ createdAt: 1 }).limit(50);
+
+    const withPosition = data.map((c, i) => ({
+      ...c.toObject(),
+      queuePosition: i + 1,
+    }));
+
+    return res.status(200).json({ success: true, data: withPosition });
+  } catch (err) {
+    console.error('[QUEUE_ERROR]', err.message);
+    res.status(500).json({ success: false });
+  }
+};
+
+/* ── Customer portal: get their active consultation ── */
+export const getCustomerActiveSession = async (req, res) => {
+  try {
+    const customer = req.customer;
+    const ownerId  = customer.ownerId;
+    const email    = customer.email;
+    const phone    = customer.phone;
+
+    const filter = {
+      ownerId,
+      status: { $in: ['waiting', 'in_progress'] },
+      $or: [
+        { customerEmail: email },
+        ...(phone ? [{ customerPhone: phone }] : []),
+      ],
+    };
+
+    const consultation = await Consultation.findOne(filter).sort({ createdAt: -1 });
+    if (!consultation) {
+      return res.status(200).json({ success: true, data: null });
+    }
+
+    // Queue position
+    const ahead = await Consultation.countDocuments({
+      ownerId,
+      status: 'waiting',
+      createdAt: { $lt: consultation.createdAt },
+    });
+    const position = consultation.status === 'in_progress' ? 0 : ahead + 1;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...consultation.toObject(),
+        queuePosition: position,
+        isActive: consultation.status === 'in_progress',
+      },
+    });
+  } catch (err) {
+    console.error('[CUSTOMER_SESSION_ERROR]', err.message);
+    res.status(500).json({ success: false });
   }
 };
 
