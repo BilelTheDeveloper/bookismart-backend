@@ -161,6 +161,12 @@ const UserSchema = new mongoose.Schema({
   // The owner can rotate this nonce to instantly invalidate old worker links.
   workModeInviteNonce: { type: Number, default: 0 },
 
+  // --- 10. NOTIFICATION PREFERENCES ---
+  notificationPrefs: {
+    newBookingEmail: { type: Boolean, default: true },
+    cancellationEmail: { type: Boolean, default: true },
+  },
+
 }, { 
   timestamps: true 
 });

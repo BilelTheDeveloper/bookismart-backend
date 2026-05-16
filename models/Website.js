@@ -44,8 +44,9 @@ const WebsiteSchema = new mongoose.Schema({
   services: [{
     title: { type: String, required: true },
     description: { type: String },
-    price: { type: String }, // String to allow "Starting at 20 TND" or "Free"
+    price: { type: String },
     duration: { type: Number, default: 30, min: 5, max: 480 }, // Minutes
+    bufferTime: { type: Number, default: 0, min: 0, max: 120 }, // Cleanup/prep minutes after service
     active: { type: Boolean, default: true }
   }],
 
@@ -78,7 +79,17 @@ const WebsiteSchema = new mongoose.Schema({
     isClosed: { type: Boolean, default: false } // For "Closed on Sundays"
   }],
 
-  // --- 8. BOOKING & LOCALIZATION SETTINGS ---
+  // --- 8. SEASONAL HOURS OVERRIDES ---
+  seasonalHours: [{
+    label: { type: String, default: 'Special Hours', trim: true },
+    startDate: { type: String, required: true }, // "YYYY-MM-DD"
+    endDate:   { type: String, required: true }, // "YYYY-MM-DD"
+    isClosed:  { type: Boolean, default: false },
+    open:      { type: String, default: '09:00' },
+    close:     { type: String, default: '18:00' },
+  }],
+
+  // --- 9. BOOKING & LOCALIZATION SETTINGS ---
   setupConfig: {
     maxCustomersPerDay: { type: Number, default: 25, min: 1, max: 500 },
     restMinutesBetweenConsultations: { type: Number, default: 0, min: 0, max: 180 },

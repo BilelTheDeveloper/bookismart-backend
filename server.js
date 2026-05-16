@@ -25,6 +25,10 @@ import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.
 import { ownerConsultationRouter } from './routes/consultationRoutes.js';
 import merchantInsightsRoutes from './routes/merchantInsightsRoutes.js';
 import workModeRoutes from './routes/workModeRoutes.js';
+import financeRoutes from './routes/financeRoutes.js';
+import invoiceRoutes from './routes/invoiceRoutes.js';
+import loyaltyRoutes from './routes/loyaltyRoutes.js';
+import settingsRoutes from './routes/settingsRoutes.js';
 
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -141,6 +145,10 @@ app.use('/api/merchant/website', websiteRoutes);
 app.use('/api/merchant/bookings', ownerBookingRouter); // Owner dashboard management (auth required)
 app.use('/api/merchant/consultations', ownerConsultationRouter);
 app.use('/api/merchant/insights', merchantInsightsRoutes);
+app.use('/api/merchant/finance', financeRoutes);
+app.use('/api/merchant/invoices', invoiceRoutes);
+app.use('/api/merchant/loyalty', loyaltyRoutes);
+app.use('/api/merchant/settings', settingsRoutes);
 app.use('/api/work-mode', workModeRoutes);
 
 // Health check endpoint (used by keep-alive pinger)

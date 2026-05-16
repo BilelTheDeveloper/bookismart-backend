@@ -114,3 +114,77 @@ export const getOwnerCustomerHistory = async (req, res) => {
   }
 };
 
+export const getAnalyticsData = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const year = new Date().getFullYear();
+
+    // Booking status counts
+    const [pending, confirmed, completed, cancelled, noShow] = await Promise.all([
+      Booking.countDocuments({ ownerId, status: 'pending' }),
+      Booking.countDocuments({ ownerId, status: 'confirmed' }),
+      Booking.countDocuments({ ownerId, status: 'completed' }),
+      Booking.countDocuments({ ownerId, status: 'cancelled' }),
+      Booking.countDocuments({ ownerId, status: 'no-show' }),
+    ]);
+
+    const total = pending + confirmed + completed + cancelled + noShow;
+    const completionRate = total ? Math.round((completed / total) * 100) : 0;
+
+    // Top services from completed bookings in the last 90 days
+    const since90d = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const recentBookings = await Booking.find({
+      ownerId,
+      status: 'completed',
+      appointmentDate: { $gte: since90d },
+    }).select('service');
+
+    const serviceMap = {};
+    recentBookings.forEach((b) => {
+      const name = b.service?.title || 'Unknown';
+      const price = toMoneyNumber(b.service?.price);
+      if (!serviceMap[name]) serviceMap[name] = { name, count: 0, revenue: 0 };
+      serviceMap[name].count++;
+      serviceMap[name].revenue += price;
+    });
+
+    const topServices = Object.values(serviceMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    // Monthly booking counts for the current year
+    const yearStart = new Date(year, 0, 1);
+    const yearEnd = new Date(year + 1, 0, 1);
+    const yearBookings = await Booking.find({
+      ownerId,
+      appointmentDate: { $gte: yearStart, $lt: yearEnd },
+    }).select('appointmentDate status');
+
+    const monthlyBookings = Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1,
+      label: new Date(year, i, 1).toLocaleString('en-US', { month: 'short' }),
+      count: 0,
+      completed: 0,
+    }));
+
+    yearBookings.forEach((b) => {
+      const m = new Date(b.appointmentDate).getMonth();
+      monthlyBookings[m].count++;
+      if (b.status === 'completed') monthlyBookings[m].completed++;
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        statusBreakdown: { pending, confirmed, completed, cancelled, noShow, total },
+        completionRate,
+        topServices,
+        monthlyBookings,
+      },
+    });
+  } catch (error) {
+    console.error(`[ANALYTICS_DATA_ERROR] ${error.message}`);
+    return res.status(500).json({ success: false, message: 'Failed to load analytics data.' });
+  }
+};
+

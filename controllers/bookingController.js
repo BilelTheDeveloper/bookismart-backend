@@ -1,6 +1,10 @@
 import Booking from '../models/Booking.js';
 import Website from '../models/Website.js';
 import User from '../models/User.js';
+import LoyaltyProgram from '../models/LoyaltyProgram.js';
+import CustomerLoyalty from '../models/CustomerLoyalty.js';
+import Invoice from '../models/Invoice.js';
+import { sendEmail } from '../utils/emailService.js';
 
 /**
  * 📅 BOOKING CONTROLLER
@@ -53,6 +57,86 @@ const isInPauseWindow = ({ candidateStart, candidateEnd, pauseWindows }) => {
   });
 };
 
+/**
+ * Returns the effective hours config for a given date.
+ * Seasonal overrides take priority over regular businessHours.
+ * Compares ISO date strings (YYYY-MM-DD) — string comparison is safe for this format.
+ */
+const resolveHoursForDate = (website, dateString) => {
+  const overrides = (website.seasonalHours || []).filter(sh => sh.startDate && sh.endDate);
+  for (const sh of overrides) {
+    if (dateString >= sh.startDate && dateString <= sh.endDate) {
+      return { open: sh.open, close: sh.close, isClosed: sh.isClosed };
+    }
+  }
+  const dayName = getDayName(dateString);
+  return (website.businessHours || []).find(d => d.day === dayName) || null;
+};
+
+/** Returns a map of { [serviceTitle]: bufferTime } for O(1) conflict lookups. */
+const buildServiceBufferMap = (website) => {
+  const map = {};
+  (website.services || []).forEach(s => {
+    if (s.title) map[s.title] = Math.max(0, parseInt(s.bufferTime) || 0);
+  });
+  return map;
+};
+
+/**
+ * Non-blocking side-effects fired when a booking is marked 'completed' for the first time.
+ * Awards loyalty points/stamps and auto-generates a draft invoice.
+ */
+const _onBookingCompleted = async (ownerId, booking) => {
+  const customerEmail = (booking.customerEmail || '').toLowerCase().trim();
+  const servicePrice = parseFloat(String(booking.service?.price || '0').replace(/[^0-9.]/g, '')) || 0;
+
+  // 1. Award loyalty
+  try {
+    const program = await LoyaltyProgram.findOne({ ownerId, isActive: true });
+    if (program && customerEmail) {
+      const loyaltyInc = { totalVisits: 1, totalSpend: servicePrice };
+      if (program.mode === 'points') loyaltyInc.points = program.pointsPerBooking || 1;
+      else loyaltyInc.stamps = 1;
+      await CustomerLoyalty.findOneAndUpdate(
+        { ownerId, customerEmail },
+        {
+          $set: { customerName: booking.customerName, customerPhone: booking.customerPhone || '', lastVisitAt: new Date() },
+          $inc: loyaltyInc,
+        },
+        { upsert: true }
+      );
+    }
+  } catch (e) {
+    console.error('[COMPLETION_LOYALTY_ERROR]', e.message);
+  }
+
+  // 2. Auto-generate a draft invoice (skip if one already exists for this booking)
+  try {
+    if (servicePrice > 0) {
+      const exists = await Invoice.findOne({ bookingId: booking._id });
+      if (!exists) {
+        const taxRate = 19;
+        const taxAmount = parseFloat((servicePrice * taxRate / 100).toFixed(3));
+        await Invoice.create({
+          ownerId,
+          customer: { name: booking.customerName, email: booking.customerEmail, phone: booking.customerPhone || '' },
+          bookingId: booking._id,
+          items: [{ description: booking.service?.title || 'Service', quantity: 1, unitPrice: servicePrice, total: servicePrice }],
+          subtotal: servicePrice,
+          taxRate,
+          taxAmount,
+          total: servicePrice + taxAmount,
+          status: 'draft',
+          issuedDate: new Date(),
+          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[COMPLETION_INVOICE_ERROR]', e.message);
+  }
+};
+
 /* ─────────────────────────────────────────────────────────────────────────────
    1. GET MERCHANT BOOKING INFO (Services + Business Hours)
    @route  GET /api/public/booking/:merchantId
@@ -89,6 +173,7 @@ export const getBookingInfo = async (req, res) => {
         slug: website.slug,
         services: activeServices,
         businessHours: website.businessHours || [],
+        seasonalHours: website.seasonalHours || [],
         setupConfig: website.setupConfig || {},
         contact: website.contact || {},
       },
@@ -129,7 +214,7 @@ export const getAvailableSlots = async (req, res) => {
     }
 
     const dayName = getDayName(date);
-    const dayConfig = website.businessHours.find((d) => d.day === dayName);
+    const dayConfig = resolveHoursForDate(website, date);
 
     if (!dayConfig || dayConfig.isClosed) {
       return res.status(200).json({
@@ -143,9 +228,9 @@ export const getAvailableSlots = async (req, res) => {
     const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
     const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
     const pauseWindows = (setupConfig.pauseWindows || []).filter((p) => p?.start && p?.end && p.start < p.end);
+    const serviceBufferMap = buildServiceBufferMap(website);
     const allSlots = generateTimeSlots(dayConfig.open, dayConfig.close, serviceDuration);
 
-    // When rescheduling, exclude the current booking so its slot appears free
     const bookingFilter = {
       ownerId: merchantId,
       dateString: date,
@@ -155,7 +240,7 @@ export const getAvailableSlots = async (req, res) => {
       bookingFilter._id = { $ne: excludeBookingId };
     }
 
-    const bookedSlots = await Booking.find(bookingFilter).select('timeSlot service.duration');
+    const bookedSlots = await Booking.find(bookingFilter).select('timeSlot service.duration service.title');
     const isFullyBookedByLimit = bookedSlots.length >= maxCustomersPerDay;
 
     const slots = allSlots.map((time) => {
@@ -169,12 +254,13 @@ export const getAvailableSlots = async (req, res) => {
       const hasConflict = bookedSlots.some((booking) => {
         const existingStart = toMinutes(booking.timeSlot);
         const existingDuration = parseInt(booking?.service?.duration) || 30;
+        const existingBuffer = Math.max(restMinutes, serviceBufferMap[booking.service?.title] || 0);
         return hasIntervalConflict({
           candidateStart,
           candidateEnd,
           existingStart,
           existingDuration,
-          restMinutes,
+          restMinutes: existingBuffer,
         });
       });
 
@@ -203,6 +289,92 @@ export const getAvailableSlots = async (req, res) => {
 };
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   SIDE-EFFECT: Email owner on new booking (non-blocking)
+   ───────────────────────────────────────────────────────────────────────────── */
+const _notifyOwnerNewBooking = async (owner, booking) => {
+  if (!owner?.notificationPrefs?.newBookingEmail) return;
+  if (!owner.email) return;
+
+  const dashboardUrl = `${process.env.CLIENT_URL || 'https://bookiify.vercel.app'}/owner/dashboard/appointments`;
+
+  await sendEmail({
+    to: owner.email,
+    subject: `📅 New Booking — ${booking.customerName} for ${booking.service?.title}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { margin: 0; padding: 0; background: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+          .wrapper { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 24px; overflow: hidden; border: 1px solid #e2e8f0; }
+          .header { background: #0f172a; padding: 32px 40px; }
+          .logo { color: #ffffff; font-size: 22px; font-weight: 900; letter-spacing: -1px; }
+          .logo span { color: #6366f1; }
+          .badge { display: inline-block; background: #6366f1; color: #fff; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; padding: 5px 14px; border-radius: 99px; margin-top: 16px; }
+          .body { padding: 40px; }
+          .headline { font-size: 26px; font-weight: 900; color: #0f172a; margin: 0 0 8px; }
+          .sub { font-size: 14px; color: #64748b; margin: 0 0 32px; font-weight: 500; }
+          .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; }
+          .card-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #94a3b8; margin-bottom: 16px; }
+          .row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+          .row:last-child { border-bottom: none; }
+          .row-label { font-size: 12px; font-weight: 700; color: #64748b; }
+          .row-value { font-size: 13px; font-weight: 900; color: #0f172a; }
+          .highlight { color: #6366f1; }
+          .btn { display: block; text-align: center; background: #6366f1; color: #ffffff !important; text-decoration: none; font-weight: 800; font-size: 14px; padding: 18px 32px; border-radius: 16px; margin-top: 32px; box-shadow: 0 8px 20px -4px #6366f150; }
+          .notes-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 16px; margin-top: 16px; }
+          .notes-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #92400e; margin-bottom: 6px; }
+          .notes-text { font-size: 13px; color: #1e293b; font-weight: 500; }
+          .footer { padding: 24px 40px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <div class="wrapper">
+          <div class="header">
+            <div class="logo">BOOKIIFY<span>.</span></div>
+            <div class="badge">New Booking Alert</div>
+          </div>
+          <div class="body">
+            <h1 class="headline">You have a new booking!</h1>
+            <p class="sub">A customer just scheduled an appointment. Review it below.</p>
+
+            <div class="card">
+              <div class="card-title">Customer Info</div>
+              <div class="row"><span class="row-label">Name</span><span class="row-value">${booking.customerName}</span></div>
+              <div class="row"><span class="row-label">Phone</span><span class="row-value">${booking.customerPhone}</span></div>
+              <div class="row"><span class="row-label">Email</span><span class="row-value">${booking.customerEmail}</span></div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">Appointment Details</div>
+              <div class="row"><span class="row-label">Service</span><span class="row-value highlight">${booking.service?.title}</span></div>
+              <div class="row"><span class="row-label">Price</span><span class="row-value">${booking.service?.price || 'N/A'} TND</span></div>
+              <div class="row"><span class="row-label">Duration</span><span class="row-value">${booking.service?.duration || 30} min</span></div>
+              <div class="row"><span class="row-label">Date</span><span class="row-value">${booking.dateString}</span></div>
+              <div class="row"><span class="row-label">Time</span><span class="row-value">${booking.timeSlot}</span></div>
+              <div class="row"><span class="row-label">Day</span><span class="row-value">${booking.dayOfWeek}</span></div>
+            </div>
+
+            ${booking.notes ? `
+            <div class="notes-box">
+              <div class="notes-label">Customer Notes</div>
+              <div class="notes-text">${booking.notes}</div>
+            </div>` : ''}
+
+            <a href="${dashboardUrl}" class="btn">VIEW BOOKING IN DASHBOARD</a>
+          </div>
+          <div class="footer">
+            This notification was sent because you have new booking alerts enabled.<br/>
+            &copy; 2026 Bookiify &mdash; You can manage notification settings in your dashboard.
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+  });
+};
+
+/* ─────────────────────────────────────────────────────────────────────────────
    3. CREATE A BOOKING
    @route  POST /api/public/booking/:merchantId
    @access Public
@@ -225,7 +397,7 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cannot book in the past.' });
     }
 
-    const owner = await User.findById(merchantId).select('_id accountStatus');
+    const owner = await User.findById(merchantId).select('_id accountStatus email notificationPrefs');
     if (!owner || owner.accountStatus === 'suspended') {
       return res.status(404).json({ success: false, message: 'Merchant not found or suspended.' });
     }
@@ -250,13 +422,13 @@ export const createBooking = async (req, res) => {
     const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
     const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
     const pauseWindows = (setupConfig.pauseWindows || []).filter((p) => p?.start && p?.end && p.start < p.end);
-    const dayName = getDayName(date);
-    const dayConfig = website?.businessHours?.find((d) => d.day === dayName);
+    const serviceBufferMap = buildServiceBufferMap(website);
+    const dayConfig = resolveHoursForDate(website, date);
 
     if (!dayConfig || dayConfig.isClosed) {
       return res.status(400).json({
         success: false,
-        message: `This business is closed on ${dayName}.`,
+        message: 'This business is closed on the selected date.',
       });
     }
 
@@ -276,7 +448,7 @@ export const createBooking = async (req, res) => {
       ownerId: merchantId,
       dateString: date,
       status: { $in: ['pending', 'confirmed'] },
-    }).select('timeSlot service.duration');
+    }).select('timeSlot service.duration service.title');
 
     if (activeBookings.length >= maxCustomersPerDay) {
       return res.status(409).json({
@@ -289,12 +461,13 @@ export const createBooking = async (req, res) => {
     const overlapsExisting = activeBookings.some((existingBooking) => {
       const existingStart = toMinutes(existingBooking.timeSlot);
       const existingDuration = parseInt(existingBooking?.service?.duration) || 30;
+      const existingBuffer = Math.max(restMinutes, serviceBufferMap[existingBooking.service?.title] || 0);
       return hasIntervalConflict({
         candidateStart,
         candidateEnd,
         existingStart,
         existingDuration,
-        restMinutes,
+        restMinutes: existingBuffer,
       });
     });
 
@@ -320,10 +493,15 @@ export const createBooking = async (req, res) => {
       appointmentDate,
       dateString: date,
       timeSlot,
-      dayOfWeek: dayName,
+      dayOfWeek: getDayName(date),
       notes: notes?.trim() || '',
       status: 'pending',
     });
+
+    // Non-blocking: email owner about the new booking
+    _notifyOwnerNewBooking(owner, booking).catch((err) =>
+      console.error('[BOOKING_EMAIL_NOTIFY_ERROR]', err.message)
+    );
 
     res.status(201).json({
       success: true,
@@ -384,7 +562,6 @@ export const getMyBookings = async (req, res) => {
       Booking.countDocuments(filter),
     ]);
 
-    // Summary counts — always scoped to owner, regardless of current filter
     const [pendingCount, confirmedCount, completedCount, cancelledCount, noShowCount] =
       await Promise.all([
         Booking.countDocuments({ ownerId, status: 'pending' }),
@@ -456,6 +633,13 @@ export const updateBookingStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid status value.' });
     }
 
+    // Fetch current status first to detect first-time completion
+    const existing = await Booking.findOne({ _id: bookingId, ownerId }).select('status');
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Booking not found.' });
+    }
+    const wasAlreadyCompleted = existing.status === 'completed';
+
     const booking = await Booking.findOneAndUpdate(
       { _id: bookingId, ownerId },
       { status },
@@ -464,6 +648,13 @@ export const updateBookingStatus = async (req, res) => {
 
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found.' });
+    }
+
+    // Fire non-blocking side-effects on first completion
+    if (status === 'completed' && !wasAlreadyCompleted) {
+      _onBookingCompleted(ownerId, booking).catch((e) =>
+        console.error('[COMPLETION_HOOK_ERROR]', e.message)
+      );
     }
 
     res.status(200).json({ success: true, data: booking });
@@ -489,13 +680,11 @@ export const rescheduleBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: 'New date and time are required.' });
     }
 
-    // 1. Find booking and verify ownership
     const booking = await Booking.findOne({ _id: bookingId, ownerId });
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found.' });
     }
 
-    // 2. Cannot reschedule completed or no-show bookings
     if (['completed', 'no-show'].includes(booking.status)) {
       return res.status(400).json({
         success: false,
@@ -503,7 +692,6 @@ export const rescheduleBooking = async (req, res) => {
       });
     }
 
-    // 3. Date must not be in the past
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const newDate = new Date(date);
@@ -512,7 +700,6 @@ export const rescheduleBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cannot reschedule to a past date.' });
     }
 
-    // 4. Check the new slot is not taken by another booking (exclude self)
     const conflict = await Booking.findOne({
       ownerId,
       dateString: date,
@@ -529,14 +716,15 @@ export const rescheduleBooking = async (req, res) => {
       });
     }
 
-    // 5. Verify business is open on the new day
     const website = await Website.findOne({ ownerId });
     const setupConfig = website?.setupConfig || {};
     const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
     const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
     const pauseWindows = (setupConfig.pauseWindows || []).filter((p) => p?.start && p?.end && p.start < p.end);
+    const serviceBufferMap = buildServiceBufferMap(website);
     const dayName = getDayName(date);
-    const dayConfig = website?.businessHours?.find((d) => d.day === dayName);
+    const dayConfig = resolveHoursForDate(website, date);
+
     if (!dayConfig || dayConfig.isClosed) {
       return res.status(400).json({
         success: false,
@@ -560,7 +748,7 @@ export const rescheduleBooking = async (req, res) => {
       dateString: date,
       status: { $in: ['pending', 'confirmed'] },
       _id: { $ne: bookingId },
-    }).select('timeSlot service.duration');
+    }).select('timeSlot service.duration service.title');
 
     if (activeBookings.length >= maxCustomersPerDay) {
       return res.status(409).json({
@@ -573,12 +761,13 @@ export const rescheduleBooking = async (req, res) => {
     const overlapsExisting = activeBookings.some((existingBooking) => {
       const existingStart = toMinutes(existingBooking.timeSlot);
       const existingDuration = parseInt(existingBooking?.service?.duration) || 30;
+      const existingBuffer = Math.max(restMinutes, serviceBufferMap[existingBooking.service?.title] || 0);
       return hasIntervalConflict({
         candidateStart,
         candidateEnd,
         existingStart,
         existingDuration,
-        restMinutes,
+        restMinutes: existingBuffer,
       });
     });
 
@@ -590,7 +779,6 @@ export const rescheduleBooking = async (req, res) => {
       });
     }
 
-    // 6. Apply the update
     const appointmentDate = new Date(`${date}T${timeSlot}:00`);
     const updated = await Booking.findByIdAndUpdate(
       bookingId,
@@ -599,7 +787,7 @@ export const rescheduleBooking = async (req, res) => {
         timeSlot,
         dayOfWeek: dayName,
         appointmentDate,
-        status: 'confirmed', // Auto-confirm when owner reschedules
+        status: 'confirmed',
       },
       { new: true }
     );
