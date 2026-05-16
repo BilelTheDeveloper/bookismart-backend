@@ -70,7 +70,7 @@ const corsOptions = {
 
 // Answer ALL preflight requests immediately — before CSRF, fingerprint,
 // rate-limit, or any other middleware can reject them.
-app.options('*', cors(corsOptions));
+app.options(/(.*)/, cors(corsOptions));
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
