@@ -35,6 +35,15 @@ import {
   ownerCustomerRouter,
   adminCustomerRouter,
 } from './routes/customerRoutes.js';
+import {
+  publicRecruitmentRouter,
+  ownerRecruitmentRouter,
+  adminRecruitmentRouter,
+} from './routes/recruitmentRoutes.js';
+import staffRoutes        from './routes/staffRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import chatRoutes         from './routes/chatRoutes.js';
+import paymentRoutes      from './routes/paymentRoutes.js';
 
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -83,6 +92,9 @@ app.use(helmet({
 }));
 
 app.use(cors(corsOptions));
+
+// Stripe webhook — raw body BEFORE express.json()
+app.use('/api/payments', paymentRoutes);
 
 // 🛡️ DATA PARSING
 app.use(express.json({ limit: '10mb' }));
@@ -168,6 +180,16 @@ app.use('/api/customer',           portalCustomerRouter);
 app.use('/api/merchant/customers', ownerCustomerRouter);
 app.use('/api/admin/customers',    adminCustomerRouter);
 
+// Recruitment
+app.use('/api/public/recruitment',    publicRecruitmentRouter);
+app.use('/api/merchant/recruitment',  ownerRecruitmentRouter);
+app.use('/api/admin/recruitment',     adminRecruitmentRouter);
+
+// Staff, Notifications, Chat
+app.use('/api/merchant/staff',         staffRoutes);
+app.use('/api/merchant/notifications', notificationRoutes);
+app.use('/api/merchant/chat',          chatRoutes);
+
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -238,6 +260,26 @@ io.on('connection', (socket) => {
   });
   socket.on('leave', ({ room }) => {
     if (typeof room === 'string' && room.length < 200) socket.leave(room);
+  });
+
+  // Personal notification room (owner joins as "user:<userId>")
+  socket.on('user:join', ({ userId }) => {
+    if (typeof userId === 'string' && userId.length > 0) socket.join(`user:${userId}`);
+  });
+
+  // Chat room join / leave
+  socket.on('chat:join', ({ roomId }) => {
+    if (typeof roomId === 'string') socket.join(`chat:${roomId}`);
+  });
+  socket.on('chat:leave', ({ roomId }) => {
+    if (typeof roomId === 'string') socket.leave(`chat:${roomId}`);
+  });
+
+  // Typing indicator relay
+  socket.on('chat:typing', ({ roomId, senderName, isTyping }) => {
+    if (typeof roomId === 'string') {
+      socket.to(`chat:${roomId}`).emit('chat:typing', { senderName, isTyping });
+    }
   });
 
   // Worker can send messages via socket without custom headers (avoids CORS preflight).
