@@ -1,10 +1,5 @@
 import Invoice from '../models/Invoice.js';
-import nodemailer from 'nodemailer';
-
-const getTransporter = () => nodemailer.createTransport({
-  service: 'gmail',
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-});
+import { sendEmail } from '../utils/emailService.js';
 
 const calcTotals = (items, taxRate = 19, discount = 0) => {
   const subtotal = items.reduce((s, item) => s + item.quantity * item.unitPrice, 0);
@@ -233,9 +228,7 @@ export const sendInvoiceEmail = async (req, res) => {
     </html>
     `;
 
-    const transporter = getTransporter();
-    await transporter.sendMail({
-      from: `"${owner.businessName || 'Bookiify'}" <${process.env.EMAIL_USER}>`,
+    await sendEmail({
       to: invoice.customer.email,
       subject: `Invoice ${invoice.invoiceNumber} from ${owner.businessName || 'Bookiify'}`,
       html,

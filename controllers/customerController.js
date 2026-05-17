@@ -331,7 +331,7 @@ export const submitKYC = async (req, res) => {
 
     // Notify admin (non-blocking)
     sendEmail({
-      to: process.env.ADMIN_EMAIL || process.env.EMAIL_USER,
+      to: process.env.ADMIN_EMAIL || process.env.BREVO_SMTP_USER,
       subject: `New Client KYC Submitted — ${customer.fullName}`,
       html: buildAdminKycNotify({ customerName: customer.fullName, businessName: customer.businessName }),
     }).catch(() => {});

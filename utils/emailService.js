@@ -5,20 +5,21 @@ import nodemailer from 'nodemailer';
  * Purpose: Handles high-fidelity transactional notifications for KYC & Auth.
  */
 
-// Initialize Transporter with Connection Pooling for performance
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  pool: true, // Keeps the connection open for multiple emails
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  secure: false,
+  pool: true,
   maxConnections: 5,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // App Password required
+    user: process.env.BREVO_SMTP_USER,
+    pass: process.env.BREVO_SMTP_KEY,
   },
 });
 
 export const sendEmail = async ({ to, subject, html, text, attachments = [] }) => {
   const mailOptions = {
-    from: `"Bookiify" <${process.env.EMAIL_USER}>`,
+    from: `"${process.env.EMAIL_FROM_NAME || 'Bookiify'}" <${process.env.BREVO_SMTP_USER}>`,
     to,
     subject,
     html,
@@ -43,7 +44,7 @@ export const sendStatusEmail = async (userEmail, userName, status, reason = "") 
   const borderColor = isApproved ? '#ddd6fe' : '#fda4af';
 
   const mailOptions = {
-    from: `"Bookiify Control Center" <${process.env.EMAIL_USER}>`,
+    from: `"Bookiify Control Center" <${process.env.BREVO_SMTP_USER}>`,
     to: userEmail,
     subject: isApproved 
       ? "✔️ Account Verified: Your Professional Dashboard is Ready" 

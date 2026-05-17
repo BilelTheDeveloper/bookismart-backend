@@ -1,14 +1,10 @@
 import crypto from 'crypto';
-import nodemailer from 'nodemailer';
 import { v2 as cloudinary } from 'cloudinary';
 import Staff from '../models/Staff.js';
+import { sendEmail } from '../utils/emailService.js';
 
-const transporter = nodemailer.createTransport({
-  service: 'Gmail',
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-});
 const sendMail = async (to, subject, html) => {
-  try { await transporter.sendMail({ from: `"Bookiify" <${process.env.EMAIL_USER}>`, to, subject, html }); } catch {}
+  try { await sendEmail({ to, subject, html }); } catch {}
 };
 
 const inviteEmailHtml = (staff, owner, token) => `

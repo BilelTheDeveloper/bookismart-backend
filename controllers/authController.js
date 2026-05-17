@@ -1,17 +1,18 @@
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
-import { 
+import {
   generateAccessAndRefreshTokens,
-  getCookieOptions, // 🛡️ Import the central cookie policy
+  getCookieOptions,
   getCsrfCookieOptions,
   hashRefreshToken
 } from '../utils/tokenService.js';
-import { revokeToken } from '../middleware/authMiddleware.js'; 
+import { revokeToken } from '../middleware/authMiddleware.js';
 import { validateSignup, validateLogin } from '../validators/authValidator.js';
 import crypto from 'crypto';
 import { redis } from '../config/redis.js';
 import { generateCsrfToken } from '../middleware/csrfProtection.js';
 import { logSecurityEvent } from '../utils/securityEventLogger.js';
+import { sendEmail } from '../utils/emailService.js';
 
 const otpStore = new Map();
 const OTP_TTL_SECONDS = 10 * 60;
@@ -38,51 +39,85 @@ const setCsrfCookie = (res, token) => {
 };
 
 /**
- * @desc    Send OTP to Terminal for Testing
+ * @desc    Send OTP via email (Brevo)
  */
 export const sendOTP = async (req, res) => {
   const { type, target } = req.body;
+  if (!type || !target) {
+    return res.status(400).json({ success: false, message: 'type and target are required.' });
+  }
   try {
     const otpRateKey = `otp:req:${type}:${target}`;
     try {
       const reqCount = await redis.incr(otpRateKey);
-      if (reqCount === 1) {
-        await redis.expire(otpRateKey, OTP_RATE_LIMIT_SECONDS);
-      }
+      if (reqCount === 1) await redis.expire(otpRateKey, OTP_RATE_LIMIT_SECONDS);
       if (reqCount > MAX_OTP_REQUESTS) {
-        return res.status(429).json({ success: false, message: "Too many OTP requests. Try again later." });
+        return res.status(429).json({ success: false, message: 'Too many OTP requests. Try again later.' });
       }
-    } catch {
-      // Keep compatibility if Redis is temporarily unavailable.
-    }
+    } catch { /* Redis unavailable — continue */ }
 
-    const otpCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+    const otpCode = crypto.randomBytes(3).toString('hex').toUpperCase(); // 6-char code
     const otpKey = `${type}:${target}`;
-    otpStore.set(otpKey, {
-      code: otpCode,
-      expires: Date.now() + OTP_TTL_SECONDS * 1000
-    });
+    otpStore.set(otpKey, { code: otpCode, expires: Date.now() + OTP_TTL_SECONDS * 1000 });
     try {
       await redis.setEx(`otp:${otpKey}`, OTP_TTL_SECONDS, otpCode);
-    } catch {
-      // Keep local fallback store active.
+    } catch { /* fallback to local store */ }
+
+    if (type === 'email') {
+      const { success, error } = await sendEmail({
+        to: target,
+        subject: 'Bookiify — Your Verification Code',
+        html: buildOtpEmail(otpCode),
+      });
+      if (!success) {
+        console.error('[OTP_EMAIL_FAILED]', error);
+        return res.status(500).json({ success: false, message: 'Failed to send verification email.' });
+      }
     }
 
-    console.log(`
-    ╔════════════════════════════════════════════════════════════╗
-    ║          🔥 BOOKIIFY DEVELOPMENT VAULT 🔥                 ║
-    ╠════════════════════════════════════════════════════════════╣
-    ║  TYPE:   ${type.toUpperCase().padEnd(49)} ║
-    ║  TARGET: ${target.padEnd(49)} ║
-    ║  CODE:   ${otpCode.padEnd(49)} ║
-    ╚════════════════════════════════════════════════════════════╝
-    `);
-
-    res.status(200).json({ success: true, message: `OTP sent to ${target} (Check Terminal)` });
+    res.status(200).json({ success: true, message: `Verification code sent to ${target}` });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to generate OTP" });
+    console.error('[sendOTP]', err.message);
+    res.status(500).json({ success: false, message: 'Failed to generate OTP.' });
   }
 };
+
+function buildOtpEmail(code) {
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><style>
+  body{margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',Arial,sans-serif}
+  .wrap{max-width:560px;margin:40px auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+  .header{background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px 40px;text-align:center}
+  .logo{color:#fff;font-size:26px;font-weight:900;letter-spacing:-1px}
+  .logo span{color:#a5b4fc}
+  .body{padding:40px}
+  .label{font-size:13px;color:#64748b;margin-bottom:6px}
+  .title{font-size:22px;font-weight:800;color:#0f172a;margin-bottom:16px}
+  .desc{font-size:15px;color:#475569;line-height:1.6;margin-bottom:32px}
+  .code-box{background:#f5f3ff;border:2px dashed #a5b4fc;border-radius:16px;padding:28px;text-align:center;margin-bottom:32px}
+  .code{font-size:44px;font-weight:900;color:#4f46e5;letter-spacing:10px;font-family:monospace}
+  .expire{font-size:12px;color:#94a3b8;margin-top:10px}
+  .footer{background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;font-size:12px;color:#94a3b8;text-align:center}
+</style></head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="logo">BOOKIIFY<span>.</span></div>
+    </div>
+    <div class="body">
+      <div class="label">IDENTITY VERIFICATION</div>
+      <div class="title">Your verification code</div>
+      <p class="desc">Enter this code to complete your Bookiify registration. Do not share it with anyone.</p>
+      <div class="code-box">
+        <div class="code">${code}</div>
+        <div class="expire">Expires in 10 minutes</div>
+      </div>
+      <p style="font-size:13px;color:#94a3b8">If you didn't request this, you can safely ignore this email.</p>
+    </div>
+    <div class="footer">&copy; ${new Date().getFullYear()} Bookiify. All rights reserved.</div>
+  </div>
+</body></html>`;
+}
 
 /**
  * @desc    Verify OTP

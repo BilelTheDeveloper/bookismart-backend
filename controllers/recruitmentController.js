@@ -1,19 +1,11 @@
 import { v2 as cloudinary } from 'cloudinary';
-import nodemailer from 'nodemailer';
 import JobPost from '../models/JobPost.js';
 import JobApplication from '../models/JobApplication.js';
 import User from '../models/User.js';
-
-/* ─── Email Transport ─── */
-const transporter = nodemailer.createTransport({
-  service: 'Gmail',
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-});
+import { sendEmail } from '../utils/emailService.js';
 
 const sendMail = async (to, subject, html) => {
-  try {
-    await transporter.sendMail({ from: `"Bookiify" <${process.env.EMAIL_USER}>`, to, subject, html });
-  } catch { /* non-blocking */ }
+  try { await sendEmail({ to, subject, html }); } catch { /* non-blocking */ }
 };
 
 /* ─── Cloudinary helpers ─── */
