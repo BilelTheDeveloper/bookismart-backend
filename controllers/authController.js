@@ -17,7 +17,7 @@ import { sendEmail } from '../utils/emailService.js';
 const otpStore = new Map();
 const OTP_TTL_SECONDS = 10 * 60;
 const OTP_RATE_LIMIT_SECONDS = 10 * 60;
-const MAX_OTP_REQUESTS = 5;
+const MAX_OTP_REQUESTS = 10;
 const MAX_LOGIN_FAILURES = 6;
 const LOGIN_LOCK_SECONDS = 15 * 60;
 
