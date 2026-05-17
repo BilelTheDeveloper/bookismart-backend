@@ -1,4 +1,4 @@
-import Notification from '../models/Notification.js';
+﻿import Notification from '../models/Notification.js';
 
 export const getNotifications = async (req, res) => {
   try {
@@ -14,7 +14,7 @@ export const getNotifications = async (req, res) => {
 
     res.json({ success: true, notifications, total, unreadCount, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -27,7 +27,7 @@ export const markRead = async (req, res) => {
     const unreadCount = await Notification.countDocuments({ userId: req.user._id, read: false });
     res.json({ success: true, unreadCount });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -36,7 +36,7 @@ export const markAllRead = async (req, res) => {
     await Notification.updateMany({ userId: req.user._id, read: false }, { read: true });
     res.json({ success: true, unreadCount: 0 });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -45,7 +45,7 @@ export const deleteNotification = async (req, res) => {
     await Notification.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -54,7 +54,7 @@ export const clearAllNotifications = async (req, res) => {
     await Notification.deleteMany({ userId: req.user._id });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -63,6 +63,6 @@ export const getUnreadCount = async (req, res) => {
     const count = await Notification.countDocuments({ userId: req.user._id, read: false });
     res.json({ success: true, unreadCount: count });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };

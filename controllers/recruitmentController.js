@@ -1,4 +1,4 @@
-import { v2 as cloudinary } from 'cloudinary';
+﻿import { v2 as cloudinary } from 'cloudinary';
 import JobPost from '../models/JobPost.js';
 import JobApplication from '../models/JobApplication.js';
 import User from '../models/User.js';
@@ -145,7 +145,7 @@ export const getPublicJobs = async (req, res) => {
 
     res.json({ success: true, jobs, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -157,7 +157,7 @@ export const getPublicJobById = async (req, res) => {
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
     res.json({ success: true, job });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -211,7 +211,7 @@ export const applyToJob = async (req, res) => {
     if (err.code === 11000) {
       return res.status(409).json({ success: false, message: 'You have already applied for this position.' });
     }
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -245,7 +245,7 @@ export const createJob = async (req, res) => {
 
     res.status(201).json({ success: true, job });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -264,7 +264,7 @@ export const getOwnerJobs = async (req, res) => {
     const result = jobs.map(j => ({ ...j, applicationCount: countMap[j._id.toString()] || 0 }));
     res.json({ success: true, jobs: result });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -284,7 +284,7 @@ export const updateJob = async (req, res) => {
 
     res.json({ success: true, job });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -298,7 +298,7 @@ export const deleteJob = async (req, res) => {
     await job.deleteOne();
     res.json({ success: true, message: 'Job post deleted.' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -314,7 +314,7 @@ export const submitJob = async (req, res) => {
     await job.save();
     res.json({ success: true, job });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -329,7 +329,7 @@ export const closeJob = async (req, res) => {
     await job.save();
     res.json({ success: true, job });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -341,7 +341,7 @@ export const getJobApplications = async (req, res) => {
     const applications = await JobApplication.find({ jobId: job._id }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, job, applications });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -374,7 +374,7 @@ export const updateApplicationStatus = async (req, res) => {
 
     res.json({ success: true, application: app });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -395,7 +395,7 @@ export const getAdminJobs = async (req, res) => {
 
     res.json({ success: true, jobs, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -424,6 +424,6 @@ export const reviewJob = async (req, res) => {
 
     res.json({ success: true, job });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };

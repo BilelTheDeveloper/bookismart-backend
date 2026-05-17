@@ -57,7 +57,7 @@ router.patch('/websites/verify/:id', reviewWebsiteDeployment);
  * --- 🔐 MODULE 3: SECURITY ALERTS ---
  */
 router.get('/security/alerts', async (req, res) => {
-  const limit = Math.min(500, Math.max(10, Number(req.query.limit) || 200));
+  const limit = Math.min(100, Math.max(10, Number(req.query.limit) || 50));
   const data = await SecurityEvent.find({}).sort({ createdAt: -1 }).limit(limit);
   res.status(200).json({ success: true, data });
 });

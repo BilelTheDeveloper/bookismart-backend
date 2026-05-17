@@ -41,21 +41,16 @@ export const reviewUserIdentity = async (req, res) => {
 
     // 4. Handle REJECTION Logic
     else if (action === 'reject') {
-      // Rule enforcement: Rejection MUST have a reason
       if (!reason || reason.trim().length < 10) {
-        return res.status(400).json({ 
-          message: "A detailed reason (min 10 chars) is required to notify the professional." 
+        return res.status(400).json({
+          message: "A detailed reason (min 10 chars) is required to notify the professional."
         });
       }
 
-      user.accountStatus = 'on_boarding'; // Send back to onboarding to re-upload
+      user.accountStatus = 'rejected';
       user.kyc.status = 'rejected';
       user.kyc.rejectionReason = reason;
-      
-      // Reset onboarding step so they can fix their KYC (Step 4)
-      user.onboardingStep = 4;
 
-      // Trigger Rejection Email with Reason
       await sendStatusEmail(user.email, user.fullName, 'rejected', reason);
     } 
 
@@ -86,10 +81,10 @@ export const reviewUserIdentity = async (req, res) => {
  */
 export const getPendingVerifications = async (req, res) => {
   try {
-    const pendingUsers = await User.find({ 
+    const pendingUsers = await User.find({
       accountStatus: 'review',
-      'kyc.status': 'pending' 
-    }).select('fullName email businessName category ville kyc createdAt');
+      'kyc.status': 'pending'
+    }).select('fullName email businessName category ville kyc profilePicUrl createdAt');
 
     res.status(200).json({
       success: true,

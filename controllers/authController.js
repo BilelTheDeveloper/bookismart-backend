@@ -1,5 +1,6 @@
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import {
   generateAccessAndRefreshTokens,
   getCookieOptions,
@@ -13,8 +14,8 @@ import { redis } from '../config/redis.js';
 import { generateCsrfToken } from '../middleware/csrfProtection.js';
 import { logSecurityEvent } from '../utils/securityEventLogger.js';
 import { sendEmail } from '../utils/emailService.js';
+import { logActivity } from '../utils/activityLogger.js';
 
-const otpStore = new Map();
 const OTP_TTL_SECONDS = 10 * 60;
 const OTP_RATE_LIMIT_SECONDS = 10 * 60;
 const MAX_OTP_REQUESTS = 10;
@@ -46,6 +47,9 @@ export const sendOTP = async (req, res) => {
   if (!type || !target) {
     return res.status(400).json({ success: false, message: 'type and target are required.' });
   }
+  if (typeof target !== 'string' || target.length > 200) {
+    return res.status(400).json({ success: false, message: 'Invalid target.' });
+  }
   try {
     const otpRateKey = `otp:req:${type}:${target}`;
     try {
@@ -56,12 +60,13 @@ export const sendOTP = async (req, res) => {
       }
     } catch { /* Redis unavailable — continue */ }
 
-    const otpCode = crypto.randomBytes(3).toString('hex').toUpperCase(); // 6-char code
+    const otpCode = crypto.randomBytes(4).toString('hex').toUpperCase(); // 8-char code
     const otpKey = `${type}:${target}`;
-    otpStore.set(otpKey, { code: otpCode, expires: Date.now() + OTP_TTL_SECONDS * 1000 });
     try {
       await redis.setEx(`otp:${otpKey}`, OTP_TTL_SECONDS, otpCode);
-    } catch { /* fallback to local store */ }
+    } catch {
+      return res.status(503).json({ success: false, message: 'Verification service temporarily unavailable.' });
+    }
 
     if (type === 'email') {
       const { success, error } = await sendEmail({
@@ -124,36 +129,52 @@ function buildOtpEmail(code) {
  */
 export const verifyOTP = async (req, res) => {
   const { type, target, code } = req.body;
-  const otpKey = `${type}:${target}`;
+  if (!type || !target || !code) {
+    return res.status(400).json({ success: false, message: 'type, target and code are required.' });
+  }
+
+  const otpKey     = `${type}:${target}`;
+  const attemptKey = `otp:attempts:${otpKey}`;
+  const MAX_OTP_ATTEMPTS = 5;
+
+  // Check brute force attempt counter
+  try {
+    const attempts = await redis.get(attemptKey);
+    if (attempts && parseInt(attempts) >= MAX_OTP_ATTEMPTS) {
+      return res.status(429).json({ success: false, message: 'Too many incorrect attempts. Request a new code.' });
+    }
+  } catch { /* Redis unavailable — continue */ }
+
   let storedCode = null;
   try {
     storedCode = await redis.get(`otp:${otpKey}`);
   } catch {
-    storedCode = null;
+    return res.status(503).json({ success: false, message: 'Verification service temporarily unavailable.' });
   }
 
   if (!storedCode) {
-    const fallback = otpStore.get(otpKey);
-    if (!fallback) return res.status(400).json({ success: false, message: "OTP expired or not requested" });
-    if (Date.now() > fallback.expires) {
-      otpStore.delete(otpKey);
-      return res.status(400).json({ success: false, message: "OTP has expired" });
-    }
-    storedCode = fallback.code;
+    return res.status(400).json({ success: false, message: 'Code expired or not requested.' });
   }
 
-  if (!safeEqual(storedCode, code)) return res.status(400).json({ success: false, message: "Invalid verification code" });
-  otpStore.delete(otpKey);
+  if (!safeEqual(storedCode, code)) {
+    try {
+      const count = await redis.incr(attemptKey);
+      if (count === 1) await redis.expire(attemptKey, OTP_TTL_SECONDS);
+    } catch { /* no-op */ }
+    return res.status(400).json({ success: false, message: 'Invalid verification code.' });
+  }
+
+  // Success — clear OTP and attempt counter
   try {
     await redis.del(`otp:${otpKey}`);
-  } catch {
-    // no-op
-  }
-  res.status(200).json({ success: true, message: "Verification successful" });
+    await redis.del(attemptKey);
+  } catch { /* no-op */ }
+
+  res.status(200).json({ success: true, message: 'Verification successful.' });
 };
 
 /**
- * @desc    Register a new professional
+ * @desc    Register a new professional — simplified (KYC submitted later from dashboard)
  */
 export const register = async (req, res) => {
   try {
@@ -162,38 +183,68 @@ export const register = async (req, res) => {
 
     const { email, phone, password, fullName, businessName, category, ville } = req.body;
 
-    const userExists = await User.findOne({ $or: [{ email }, { phone }] });
-    if (userExists) return res.status(409).json({ success: false, message: "User with this email or phone already exists" });
+    const deviceId = req.headers['x-device-fingerprint'];
+    if (!deviceId) {
+      return res.status(401).json({ success: false, code: 'FINGERPRINT_REQUIRED', message: 'Security Identity not synchronized.' });
+    }
 
-    const salt = await bcrypt.genSalt(12);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const userExists = await User.findOne({ $or: [{ email: email.toLowerCase() }, { phone }] });
+    if (userExists) return res.status(409).json({ success: false, message: 'An account with this email or phone already exists.' });
+
+    const hashedPassword = await bcrypt.hash(password, 14);
 
     const newUser = await User.create({
       fullName,
-      email,
+      email: email.trim().toLowerCase(),
       phone,
       password: hashedPassword,
       businessName,
       category,
       ville,
-      accountStatus: 'review', 
-      onboardingStep: 5,
-      kyc: {
-        idFrontUrl: req.files?.idFront ? req.files.idFront[0].path : null,
-        idBackUrl: req.files?.idBack ? req.files.idBack[0].path : null,
-        livePhotoUrl: req.files?.livenessVideo ? req.files.livenessVideo[0].path : null,
-        status: 'pending'
-      },
-      profilePicUrl: req.files?.profilePic ? req.files.profilePic[0].path : null
+      accountStatus: 'pending_kyc',
+      kyc: { status: 'none' },
+      profilePicUrl: req.files?.profilePic?.[0]?.path || null,
     });
 
-    res.status(201).json({ 
+    // Issue session tokens immediately — user is logged in right after signup
+    const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(newUser, req, deviceId);
+    const refreshTokenHash = hashRefreshToken(refreshToken);
+
+    newUser.refreshTokens.push({
+      tokenHash: refreshTokenHash,
+      deviceId,
+      lastKnownIp: req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress,
+      expiresAt: refreshTokenExpiresAt,
+    });
+    await newUser.save();
+
+    const cookieOptions = getCookieOptions();
+    const csrfToken = generateCsrfToken();
+    setCsrfCookie(res, csrfToken);
+    res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
+    res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+
+    logActivity(newUser._id, 'REGISTER', req);
+
+    res.status(201).json({
       success: true,
-      message: "Application submitted successfully. Review expected within 24h.",
-      userId: newUser._id 
+      csrfToken,
+      user: {
+        id: newUser._id,
+        fullName: newUser.fullName,
+        role: newUser.role,
+        accountStatus: newUser.accountStatus,
+        businessName: newUser.businessName,
+        category: newUser.category,
+        profilePicUrl: newUser.profilePicUrl,
+      },
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Server Error during registration", error: err.message });
+    console.error('[REGISTER_ERROR]', err.message);
+    if (err.code === 11000) {
+      return res.status(409).json({ success: false, message: 'An account with this email or phone already exists.' });
+    }
+    res.status(500).json({ success: false, message: 'Registration failed. Please try again.' });
   }
 };
 
@@ -210,9 +261,8 @@ export const login = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const ip = getClientIp(req);
-    const lockKey = `auth:lock:${normalizedEmail}:${ip}`;
-    const failKey = `auth:fail:${normalizedEmail}:${ip}`;
+    const lockKey = `auth:lock:${normalizedEmail}`;
+    const failKey = `auth:fail:${normalizedEmail}`;
 
     try {
       const locked = await redis.get(lockKey);
@@ -281,16 +331,26 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    const deviceId = req.headers['x-device-fingerprint']; 
+    const deviceId = req.headers['x-device-fingerprint'];
 
     if (!deviceId) {
-       return res.status(401).json({ 
-         success: false, 
-         code: 'FINGERPRINT_REQUIRED', 
-         message: "Security Identity not synchronized. Retrying..." 
-       });
+      return res.status(401).json({
+        success: false,
+        code: 'FINGERPRINT_REQUIRED',
+        message: "Security Identity not synchronized. Retrying...",
+      });
     }
-    
+
+    // 2FA gate: if enabled, issue a short-lived temp token and return early
+    if (user.twoFactor?.enabled) {
+      const twoFaToken = jwt.sign(
+        { id: user._id },
+        process.env.JWT_ACCESS_SECRET,
+        { expiresIn: '5m', algorithm: 'HS256', issuer: 'bookiify-api', audience: 'bookiify-2fa' }
+      );
+      return res.json({ success: true, requires2FA: true, twoFaToken });
+    }
+
     const { accessToken, refreshToken, refreshTokenExpiresAt } = await generateAccessAndRefreshTokens(user, req, deviceId);
     const refreshTokenHash = hashRefreshToken(refreshToken);
 
@@ -321,6 +381,8 @@ export const login = async (req, res) => {
     } catch {
       // no-op
     }
+
+    logActivity(user._id, 'LOGIN_SUCCESS', req);
 
     res.json({
       success: true,
@@ -444,11 +506,12 @@ export const logout = async (req, res) => {
       );
     }
 
-    // 🛡️ UPDATE: Use policy for secure cookie clearing
     const cookieOptions = getCookieOptions();
     res.clearCookie('accessToken', cookieOptions);
     res.clearCookie('refreshToken', cookieOptions);
     res.clearCookie('csrfToken', getCsrfCookieOptions());
+
+    logActivity(req.user._id, 'LOGOUT', req);
 
     res.status(200).json({ success: true, message: "Securely logged out" });
   } catch (err) {
@@ -481,6 +544,115 @@ export const verifyMe = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Verification failed" });
+  }
+};
+
+/**
+ * @desc  Forgot Password — generate a reset token and email it
+ * @route POST /api/auth/forgot-password
+ */
+export const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string' || email.length > 200) {
+    return res.status(400).json({ success: false, message: 'Valid email required.' });
+  }
+
+  // Always return 200 to prevent email enumeration
+  const genericOk = () =>
+    res.status(200).json({ success: true, message: 'If that email exists, a reset link has been sent.' });
+
+  try {
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+passwordResetToken +passwordResetExpires');
+    if (!user) return genericOk();
+
+    // Generate a cryptographically strong token
+    const rawToken  = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    user.passwordResetToken   = tokenHash;
+    user.passwordResetExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    await user.save();
+
+    const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
+    const escName  = user.fullName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    await sendEmail({
+      to: user.email,
+      subject: 'Bookiify — Reset Your Password',
+      html: `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><style>
+  body{margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',Arial,sans-serif}
+  .wrap{max-width:560px;margin:40px auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+  .header{background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px 40px;text-align:center}
+  .logo{color:#fff;font-size:26px;font-weight:900;letter-spacing:-1px}
+  .logo span{color:#a5b4fc}
+  .body{padding:40px}
+  .title{font-size:22px;font-weight:800;color:#0f172a;margin-bottom:16px}
+  .desc{font-size:15px;color:#475569;line-height:1.6;margin-bottom:32px}
+  .btn{display:block;text-align:center;background:#4f46e5;color:#fff;text-decoration:none;font-weight:800;font-size:14px;padding:18px 32px;border-radius:16px;margin:0 auto 24px}
+  .warn{font-size:12px;color:#94a3b8;text-align:center}
+  .footer{background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;font-size:12px;color:#94a3b8;text-align:center}
+</style></head>
+<body>
+  <div class="wrap">
+    <div class="header"><div class="logo">BOOKIIFY<span>.</span></div></div>
+    <div class="body">
+      <div class="title">Password Reset Request</div>
+      <p class="desc">Hello <strong>${escName}</strong>, we received a request to reset your Bookiify password. Click the button below — this link expires in <strong>15 minutes</strong>.</p>
+      <a href="${resetUrl}" class="btn">RESET MY PASSWORD</a>
+      <p class="warn">If you didn't request this, you can safely ignore this email. Your password will not change.</p>
+    </div>
+    <div class="footer">&copy; ${new Date().getFullYear()} Bookiify. All rights reserved.</div>
+  </div>
+</body></html>`,
+    });
+
+    logSecurityEvent({ level: 'INFO', msg: 'Password reset requested', code: 'PWD_RESET_REQUEST', req, userId: user._id });
+    return genericOk();
+  } catch (err) {
+    console.error('[FORGOT_PASSWORD]', err.message);
+    return res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
+  }
+};
+
+/**
+ * @desc  Reset Password — verify token and set new password
+ * @route POST /api/auth/reset-password
+ */
+export const resetPassword = async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || typeof token !== 'string' || token.length !== 64) {
+    return res.status(400).json({ success: false, message: 'Invalid or missing reset token.' });
+  }
+  if (!password || typeof password !== 'string' || password.length < 8 || password.length > 128) {
+    return res.status(400).json({ success: false, message: 'Password must be 8–128 characters.' });
+  }
+
+  try {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      passwordResetToken:   tokenHash,
+      passwordResetExpires: { $gt: new Date() },
+    }).select('+passwordResetToken +passwordResetExpires');
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'Reset link is invalid or has expired.' });
+    }
+
+    const salt = await bcrypt.genSalt(14);
+    user.password             = await bcrypt.hash(password, salt);
+    user.passwordResetToken   = undefined;
+    user.passwordResetExpires = undefined;
+    // Invalidate all existing sessions
+    user.refreshTokens = [];
+    await user.save();
+
+    logSecurityEvent({ level: 'INFO', msg: 'Password reset completed', code: 'PWD_RESET_DONE', req, userId: user._id });
+    res.status(200).json({ success: true, message: 'Password updated. Please log in.' });
+  } catch (err) {
+    console.error('[RESET_PASSWORD]', err.message);
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 

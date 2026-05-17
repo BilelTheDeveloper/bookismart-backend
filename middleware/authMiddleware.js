@@ -115,6 +115,8 @@ export const protect = async (req, res, next) => {
     /* ── 2 & 3. Verify signature + enforce algorithm allowlist ── */
     decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET, {
       algorithms : ['HS256'],
+      issuer     : 'bookiify-api',
+      audience   : 'bookiify-app',
     });
 
   } catch (error) {

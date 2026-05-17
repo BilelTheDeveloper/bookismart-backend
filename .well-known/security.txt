@@ -1,0 +1,5 @@
+Contact: mailto:bilel.thedeveloper@gmail.com
+Expires: 2027-05-18T00:00:00.000Z
+Preferred-Languages: en, fr, ar
+Policy: https://bookiify.vercel.app/security-policy
+Hiring: false

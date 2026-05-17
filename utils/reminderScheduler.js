@@ -66,7 +66,9 @@ export const runRemindersOnce = async () => {
 export const startReminderScheduler = () => {
   if (process.env.ENABLE_REMINDERS !== 'true') return;
   cron.schedule('*/1 * * * *', () => {
-    runRemindersOnce().catch(() => {});
+    runRemindersOnce().catch((err) => {
+      console.error('[REMINDER_SCHEDULER_ERROR]', err.message);
+    });
   });
 };
 

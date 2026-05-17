@@ -378,7 +378,7 @@ export const customerLogin = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    await issueCustomerTokens(customer, res);
+    await issueCustomerTokens(customer, res, req);
 
     const allowedPageKeys = customer.allowedPages.map(p => p.pageKey);
 

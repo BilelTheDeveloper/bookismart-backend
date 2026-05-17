@@ -1,4 +1,4 @@
-import ChatRoom from '../models/ChatRoom.js';
+﻿import ChatRoom from '../models/ChatRoom.js';
 import ChatMessage from '../models/ChatMessage.js';
 import { notifyUser } from '../utils/notifyUser.js';
 
@@ -9,7 +9,7 @@ export const getRooms = async (req, res) => {
     const rooms = await ChatRoom.find({ ownerId: req.user._id }).sort({ lastMessageAt: -1 }).lean();
     res.json({ success: true, rooms });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -50,7 +50,7 @@ export const createRoom = async (req, res) => {
 
     res.status(201).json({ success: true, room });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -63,7 +63,7 @@ export const updateRoom = async (req, res) => {
     await room.save();
     res.json({ success: true, room });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -87,7 +87,7 @@ export const addMember = async (req, res) => {
     }
     res.json({ success: true, room });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -109,7 +109,7 @@ export const removeMember = async (req, res) => {
     }
     res.json({ success: true, room });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -120,7 +120,7 @@ export const deleteRoom = async (req, res) => {
     await Promise.all([room.deleteOne(), ChatMessage.deleteMany({ roomId: room._id })]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -144,7 +144,7 @@ export const getMessages = async (req, res) => {
 
     res.json({ success: true, messages: messages.reverse(), total, room });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -202,7 +202,7 @@ export const sendMessage = async (req, res) => {
 
     res.status(201).json({ success: true, message });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -217,7 +217,7 @@ export const deleteMessage = async (req, res) => {
     if (io) io.to(`chat:${msg.roomId}`).emit('chat:messageDeleted', { roomId: msg.roomId, messageId: msg._id });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -229,6 +229,6 @@ export const markRoomRead = async (req, res) => {
     await room.save();
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };

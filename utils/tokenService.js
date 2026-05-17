@@ -15,10 +15,10 @@ import { calculateServerAnchor } from './fingerprintHelper.js';
  */
 export const generateAccessAndRefreshTokens = async (user, req, clientHeader) => {
   try {
-    // 1. Unified Identity Binding
-    // We calculate the same boundIdentity as the fingerprinter middleware
+    if (!clientHeader) throw new Error('Device fingerprint header is required to generate tokens.');
+
     const serverAnchor = calculateServerAnchor(req);
-    const boundFingerprint = `${serverAnchor}-${clientHeader || 'no_header'}`;
+    const boundFingerprint = `${serverAnchor}-${clientHeader}`;
 
     // 2. Create a Unique ID (jti) for this specific Access Token
     // This allows the Redis blacklist to revoke this specific session.
@@ -26,16 +26,18 @@ export const generateAccessAndRefreshTokens = async (user, req, clientHeader) =>
 
     // 3. Generate Access Token (Short-lived - 15 Minutes)
     const accessToken = jwt.sign(
-      { 
-        id: user._id, 
+      {
+        id: user._id,
         role: user.role,
-        fingerprint: boundFingerprint, // 🛡️ Bound to Hardware + Header
-        jti: accessTokenId             // 🚨 Required for Redis Blacklist
+        fingerprint: boundFingerprint,
+        jti: accessTokenId,
       },
       process.env.JWT_ACCESS_SECRET,
-      { 
+      {
         expiresIn: '15m',
-        algorithm: 'HS256'              // 🛡️ Explicitly prevent algorithm confusion
+        algorithm: 'HS256',
+        issuer: 'bookiify-api',
+        audience: 'bookiify-app',
       }
     );
 
@@ -72,8 +74,9 @@ export const hashRefreshToken = (token) => {
  * Replaces the old createDeviceFingerprint to match the new architecture
  */
 export const getBoundIdentity = (req, clientHeader) => {
+  if (!clientHeader) throw new Error('Device fingerprint header is required.');
   const serverAnchor = calculateServerAnchor(req);
-  return `${serverAnchor}-${clientHeader || 'no_header'}`;
+  return `${serverAnchor}-${clientHeader}`;
 };
 
 /**
@@ -106,7 +109,9 @@ export const getCsrfCookieOptions = () => {
 export const verifyAccessToken = (token) => {
   try {
     return jwt.verify(token, process.env.JWT_ACCESS_SECRET, {
-      algorithms: ['HS256'] 
+      algorithms: ['HS256'],
+      issuer: 'bookiify-api',
+      audience: 'bookiify-app',
     });
   } catch (error) {
     return null;

@@ -8,12 +8,18 @@ import nodemailer from 'nodemailer';
 const transporter = nodemailer.createTransport({
   host: 'smtp-relay.brevo.com',
   port: 587,
-  secure: false,
+  secure: false, // STARTTLS on port 587
   pool: true,
   maxConnections: 5,
+  connectionTimeout: 10000,
+  socketTimeout: 10000,
   auth: {
     user: process.env.BREVO_SMTP_USER,
     pass: process.env.BREVO_SMTP_KEY,
+  },
+  tls: {
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true,
   },
 });
 
@@ -37,6 +43,9 @@ export const sendEmail = async ({ to, subject, html, text, attachments = [] }) =
 /**
  * Core Logic: Generates and sends a branded status email.
  */
+const escHtml = (s) =>
+  String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 export const sendStatusEmail = async (userEmail, userName, status, reason = "") => {
   const isApproved = status === 'active';
   const brandColor = isApproved ? '#4f46e5' : '#e11d48';
@@ -76,16 +85,16 @@ export const sendStatusEmail = async (userEmail, userName, status, reason = "") 
           </h1>
 
           <p class="message">
-            Hello <strong>${userName}</strong>,<br/>
-            ${isApproved 
-              ? "Your professional credentials have been successfully validated. Your business portal is now fully unlocked and ready for bookings." 
+            Hello <strong>${escHtml(userName)}</strong>,<br/>
+            ${isApproved
+              ? "Your professional credentials have been successfully validated. Your business portal is now fully unlocked and ready for bookings."
               : "Our compliance team has completed the initial review of your application. Unfortunately, we cannot move forward with your current submission."}
           </p>
 
           ${!isApproved ? `
             <div class="reason-box">
               <p style="margin: 0; font-weight: 800; font-size: 12px; color: #e11d48; text-transform: uppercase; margin-bottom: 5px;">Rejection Reason</p>
-              <p style="margin: 0; color: #1e293b; font-weight: 500;">${reason}</p>
+              <p style="margin: 0; color: #1e293b; font-weight: 500;">${escHtml(reason)}</p>
             </div>
             <p class="message" style="font-size: 14px;">Please log in to your account to update your documents or provide the missing information specified above.</p>
           ` : ""}

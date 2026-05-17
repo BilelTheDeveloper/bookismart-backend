@@ -6,6 +6,9 @@ import CustomerLoyalty from '../models/CustomerLoyalty.js';
 import Invoice from '../models/Invoice.js';
 import { sendEmail } from '../utils/emailService.js';
 
+const escHtml = (s) =>
+  String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 /**
  * 📅 BOOKING CONTROLLER
  * Handles the full public booking flow AND the owner dashboard management flow.
@@ -340,25 +343,25 @@ const _notifyOwnerNewBooking = async (owner, booking) => {
 
             <div class="card">
               <div class="card-title">Customer Info</div>
-              <div class="row"><span class="row-label">Name</span><span class="row-value">${booking.customerName}</span></div>
-              <div class="row"><span class="row-label">Phone</span><span class="row-value">${booking.customerPhone}</span></div>
-              <div class="row"><span class="row-label">Email</span><span class="row-value">${booking.customerEmail}</span></div>
+              <div class="row"><span class="row-label">Name</span><span class="row-value">${escHtml(booking.customerName)}</span></div>
+              <div class="row"><span class="row-label">Phone</span><span class="row-value">${escHtml(booking.customerPhone)}</span></div>
+              <div class="row"><span class="row-label">Email</span><span class="row-value">${escHtml(booking.customerEmail)}</span></div>
             </div>
 
             <div class="card">
               <div class="card-title">Appointment Details</div>
-              <div class="row"><span class="row-label">Service</span><span class="row-value highlight">${booking.service?.title}</span></div>
-              <div class="row"><span class="row-label">Price</span><span class="row-value">${booking.service?.price || 'N/A'} TND</span></div>
-              <div class="row"><span class="row-label">Duration</span><span class="row-value">${booking.service?.duration || 30} min</span></div>
-              <div class="row"><span class="row-label">Date</span><span class="row-value">${booking.dateString}</span></div>
-              <div class="row"><span class="row-label">Time</span><span class="row-value">${booking.timeSlot}</span></div>
-              <div class="row"><span class="row-label">Day</span><span class="row-value">${booking.dayOfWeek}</span></div>
+              <div class="row"><span class="row-label">Service</span><span class="row-value highlight">${escHtml(booking.service?.title)}</span></div>
+              <div class="row"><span class="row-label">Price</span><span class="row-value">${escHtml(booking.service?.price || 'N/A')} TND</span></div>
+              <div class="row"><span class="row-label">Duration</span><span class="row-value">${escHtml(String(booking.service?.duration || 30))} min</span></div>
+              <div class="row"><span class="row-label">Date</span><span class="row-value">${escHtml(booking.dateString)}</span></div>
+              <div class="row"><span class="row-label">Time</span><span class="row-value">${escHtml(booking.timeSlot)}</span></div>
+              <div class="row"><span class="row-label">Day</span><span class="row-value">${escHtml(booking.dayOfWeek)}</span></div>
             </div>
 
             ${booking.notes ? `
             <div class="notes-box">
               <div class="notes-label">Customer Notes</div>
-              <div class="notes-text">${booking.notes}</div>
+              <div class="notes-text">${escHtml(booking.notes)}</div>
             </div>` : ''}
 
             <a href="${dashboardUrl}" class="btn">VIEW BOOKING IN DASHBOARD</a>
@@ -537,13 +540,16 @@ export const createBooking = async (req, res) => {
 export const getMyBookings = async (req, res) => {
   try {
     const ownerId = req.user._id;
-    const { status, date, search, page = 1, limit = 15 } = req.query;
+    const { status, date, search } = req.query;
+    const page  = Math.max(1, Math.min(1000, parseInt(req.query.page)  || 1));
+    const limit = Math.max(1, Math.min(100,  parseInt(req.query.limit) || 15));
 
     const filter = { ownerId };
     if (status && status !== 'all') filter.status = status;
     if (date) filter.dateString = date;
     if (search) {
-      const regex = new RegExp(search.trim(), 'i');
+      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
       filter.$or = [
         { customerName: regex },
         { customerEmail: regex },
@@ -552,13 +558,13 @@ export const getMyBookings = async (req, res) => {
       ];
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (page - 1) * limit;
 
     const [bookings, total] = await Promise.all([
       Booking.find(filter)
         .sort({ appointmentDate: 1 })
         .skip(skip)
-        .limit(parseInt(limit)),
+        .limit(limit),
       Booking.countDocuments(filter),
     ]);
 
@@ -584,8 +590,8 @@ export const getMyBookings = async (req, res) => {
       },
       pagination: {
         total,
-        page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit)),
+        page,
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -828,6 +834,7 @@ export const sendReviewRequest = async (req, res) => {
     const owner = await User.findById(ownerId).select('businessName fullName');
     const businessName = owner?.businessName || owner?.fullName || 'Your service provider';
 
+    const eBusiness = escHtml(businessName);
     await sendEmail({
       to: booking.customerEmail,
       subject: `How was your experience at ${businessName}? ⭐`,
@@ -835,22 +842,22 @@ export const sendReviewRequest = async (req, res) => {
         <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#f8fafc;padding:32px;border-radius:20px">
           <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:16px;padding:28px;text-align:center;margin-bottom:24px">
             <h1 style="color:#fff;margin:0;font-size:26px;font-weight:900">How Was Your Visit?</h1>
-            <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;font-size:14px">Share your experience with ${businessName}</p>
+            <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;font-size:14px">Share your experience with ${eBusiness}</p>
           </div>
-          <p style="color:#475569;font-size:15px;line-height:1.6">Hi <strong>${booking.customerName}</strong>,</p>
+          <p style="color:#475569;font-size:15px;line-height:1.6">Hi <strong>${escHtml(booking.customerName)}</strong>,</p>
           <p style="color:#475569;font-size:15px;line-height:1.6">
-            Thank you for your recent appointment on <strong>${booking.dateString}</strong>.
+            Thank you for your recent appointment on <strong>${escHtml(booking.dateString)}</strong>.
             We'd love to hear your feedback — it helps us improve and helps others find great service.
           </p>
           <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:20px 0;text-align:center">
             <p style="color:#1e293b;font-weight:700;margin:0 0 4px;font-size:16px">
-              ${booking.service?.title || 'Your appointment'}
+              ${escHtml(booking.service?.title || 'Your appointment')}
             </p>
-            <p style="color:#94a3b8;font-size:13px;margin:0">at ${businessName}</p>
+            <p style="color:#94a3b8;font-size:13px;margin:0">at ${eBusiness}</p>
           </div>
           <p style="color:#475569;font-size:14px;text-align:center;margin-top:24px">⭐ Rate 1–5 stars and leave a note. Every review matters.</p>
           <p style="color:#94a3b8;font-size:12px;text-align:center;margin-top:32px">
-            This review request was sent by ${businessName} via Bookiify.
+            This review request was sent by ${eBusiness} via Bookiify.
           </p>
         </div>
       `,

@@ -18,7 +18,8 @@ export const calculateServerAnchor = (req) => {
 
     // 2. Security Salt
     // Using your secret key as a salt makes the fingerprint unique to your app.
-    const salt = process.env.JWT_ACCESS_SECRET || 'fallback_salt_321';
+    const salt = process.env.JWT_ACCESS_SECRET;
+    if (!salt) throw new Error('JWT_ACCESS_SECRET is not set');
 
     // 3. Consistent Hashing
     // Hashing UserAgent + Salt for a "Double-Lock" hardware anchor.

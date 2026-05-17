@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+﻿import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
 import Staff from '../models/Staff.js';
 import { sendEmail } from '../utils/emailService.js';
@@ -56,7 +56,7 @@ export const inviteStaff = async (req, res) => {
     res.status(201).json({ success: true, staff });
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ success: false, message: 'A staff member with this email already exists.' });
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -65,7 +65,7 @@ export const getStaff = async (req, res) => {
     const staff = await Staff.find({ ownerId: req.user._id }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, staff });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -75,7 +75,7 @@ export const getStaffById = async (req, res) => {
     if (!member) return res.status(404).json({ success: false, message: 'Staff member not found.' });
     res.json({ success: true, staff: member });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -98,7 +98,7 @@ export const updateStaff = async (req, res) => {
     await member.save();
     res.json({ success: true, staff: member });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -110,7 +110,7 @@ export const toggleStaffStatus = async (req, res) => {
     await member.save();
     res.json({ success: true, staff: member });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -121,7 +121,7 @@ export const deleteStaff = async (req, res) => {
     await member.deleteOne();
     res.json({ success: true, message: 'Staff member removed.' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };
 
@@ -136,6 +136,6 @@ export const resendInvite = async (req, res) => {
     sendMail(member.email, `Your new invite token — ${req.user.businessName || 'Bookiify'}`, inviteEmailHtml(member, req.user, token));
     res.json({ success: true, message: 'Invite resent.' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
   }
 };

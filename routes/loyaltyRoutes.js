@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { protect, requireRole } from '../middleware/authMiddleware.js';
 import {
   getProgram,
@@ -14,8 +15,14 @@ import { validateDiscountCode } from '../controllers/loyaltyController.js';
 
 const router = express.Router();
 
+const discountLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many discount code attempts.' },
+});
+
 // Public route — validate discount code at booking time (no auth)
-router.post('/validate-code', validateDiscountCode);
+router.post('/validate-code', discountLimiter, validateDiscountCode);
 
 // Owner-protected routes
 router.use(protect, requireRole('owner'));

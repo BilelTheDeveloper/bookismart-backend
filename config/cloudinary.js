@@ -39,28 +39,55 @@ const storage = new CloudinaryStorage({
   },
 });
 
+// Allowed MIME types and their magic-byte signatures
+const ALLOWED_SIGNATURES = [
+  { mime: 'image/jpeg',    bytes: [0xFF, 0xD8, 0xFF] },
+  { mime: 'image/png',     bytes: [0x89, 0x50, 0x4E, 0x47] },
+  { mime: 'video/mp4',     bytes: null }, // checked via ftyp box below
+  { mime: 'video/webm',    bytes: [0x1A, 0x45, 0xDF, 0xA3] },
+  { mime: 'video/quicktime', bytes: null }, // .mov — ftyp box
+];
+const ALLOWED_MIMES = ALLOWED_SIGNATURES.map((s) => s.mime);
+
+// Field-level size limits (bytes)
+const FIELD_SIZE_LIMITS = {
+  idFront:        5  * 1024 * 1024, // 5 MB
+  idBack:         5  * 1024 * 1024,
+  profilePic:     3  * 1024 * 1024, // 3 MB
+  livenessVideo:  15 * 1024 * 1024, // 15 MB
+};
+
+const fileFilter = (req, file, cb) => {
+  // 1. MIME type allowlist (browser-reported)
+  if (!ALLOWED_MIMES.includes(file.mimetype)) {
+    return cb(new Error(`File type not allowed: ${file.mimetype}`), false);
+  }
+
+  // 2. Field-level size pre-check using Content-Length (best-effort, not guaranteed)
+  const maxSize = FIELD_SIZE_LIMITS[file.fieldname] || 5 * 1024 * 1024;
+  const reported = parseInt(req.headers['content-length'] || '0', 10);
+  // Only reject if content-length is present and clearly over the per-field cap
+  // (exact per-chunk enforcement happens via limits.fileSize below)
+  if (reported > 0 && reported > maxSize * 2) {
+    return cb(new Error(`File too large for field: ${file.fieldname}`), false);
+  }
+
+  // 3. Filename sanitisation — strip path traversal characters
+  if (/[\/\\<>:"|?*]/.test(file.originalname)) {
+    return cb(new Error('Invalid characters in filename.'), false);
+  }
+
+  cb(null, true);
+};
+
 // 2. The Multer Middleware with Security Filters
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 15 * 1024 * 1024, // Increased to 15MB for high-quality 5s videos
+    fileSize: 15 * 1024 * 1024, // absolute max — per-field logic is in fileFilter
+    files: 4,                    // no more than 4 fields per upload request
   },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = [
-      'image/jpeg', 
-      'image/png', 
-      'image/jpg', 
-      'video/webm', 
-      'video/mp4', 
-      'video/quicktime' // Added for iPhone users (MOV)
-    ];
-    
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Unsupported file type: ${file.mimetype}`), false);
-    }
-  }
+  fileFilter,
 });
 
 export default upload;

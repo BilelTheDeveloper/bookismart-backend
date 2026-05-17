@@ -1,4 +1,19 @@
 import 'dotenv/config';
+import mongoSanitize from 'express-mongo-sanitize';
+
+// ── Startup env validation (fail fast before anything connects) ──
+const REQUIRED_ENV = [
+  'JWT_ACCESS_SECRET', 'MONGO_URI', 'REDIS_URL',
+  'BREVO_SMTP_USER', 'BREVO_SMTP_KEY', 'CLIENT_URL',
+  'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
+];
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`[FATAL] Missing required environment variable: ${key}`);
+    process.exit(1);
+  }
+}
+
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -6,7 +21,9 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
+import jwt from 'jsonwebtoken';
 import connectDB from './config/db.js';
+import crypto from 'crypto';
 
 // 🚀 REDIS SECURITY ENGINE
 import './config/redis.js';
@@ -46,6 +63,7 @@ import searchRoutes       from './routes/searchRoutes.js';
 import customerNoteRoutes from './routes/customerNoteRoutes.js';
 import chatRoutes         from './routes/chatRoutes.js';
 import paymentRoutes      from './routes/paymentRoutes.js';
+import kycRoutes          from './routes/kycRoutes.js';
 
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -90,10 +108,43 @@ const corsOptions = {
 app.options(/(.*)/, cors(corsOptions));
 
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc:  ["'self'"],
+      styleSrc:   ["'self'", "'unsafe-inline'"],
+      imgSrc:     ["'self'", "data:", "https://res.cloudinary.com"],
+      connectSrc: ["'self'"],
+      frameSrc:   ["'none'"],
+      objectSrc:  ["'none'"],
+    },
+  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 
+// Defense-in-depth: strip MongoDB operators from all inputs
+app.use(mongoSanitize({ replaceWith: '_' }));
+
+// Force HTTPS in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+    }
+    next();
+  });
+}
+
 app.use(cors(corsOptions));
+
+// Attach a unique request ID to every request for log correlation
+app.use((req, res, next) => {
+  req.id = crypto.randomBytes(8).toString('hex');
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
 
 // Stripe webhook — raw body BEFORE express.json()
 app.use('/api/payments', paymentRoutes);
@@ -174,6 +225,7 @@ app.use('/api/merchant/finance', financeRoutes);
 app.use('/api/merchant/invoices', invoiceRoutes);
 app.use('/api/merchant/loyalty', loyaltyRoutes);
 app.use('/api/merchant/settings', settingsRoutes);
+app.use('/api/kyc', kycRoutes);
 app.use('/api/work-mode', workModeRoutes);
 
 // Customer Portal
@@ -194,6 +246,12 @@ app.use('/api/merchant/chat',          chatRoutes);
 app.use('/api/merchant/search',        searchRoutes);
 app.use('/api/merchant/notes',         customerNoteRoutes);
 app.use('/api/customer/consultation',  customerConsultationRouter);
+
+// RFC 9116 security disclosure endpoint
+app.get('/.well-known/security.txt', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.sendFile(new URL('.well-known/security.txt', import.meta.url).pathname);
+});
 
 // Health check endpoint (used by keep-alive pinger)
 app.get('/health', (req, res) => {
@@ -216,11 +274,11 @@ app.get('/', (req, res) => {
  */
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
-  console.error(`🚨 [SERVER_ERROR]: ${err.message}`);
+  console.error(`[SERVER_ERROR] ${err.name}: ${err.message}`);
+  logSecurityEvent({ level: 'ERROR', msg: err.message, code: 'UNHANDLED_ERROR', req });
   res.status(statusCode).json({
     success: false,
-    message: err.message,
-    stack: process.env.NODE_ENV === 'production' ? "🛡️ Protected" : err.stack,
+    message: process.env.NODE_ENV === 'production' ? 'An unexpected error occurred.' : err.message,
   });
 });
 
@@ -245,18 +303,47 @@ const io = new SocketIOServer(httpServer, {
 // Allow controllers to emit events without circular imports
 app.set('io', io);
 
+// ── Socket.IO authentication middleware ──
+io.use((socket, next) => {
+  // Work mode sockets bypass JWT auth (capability-token flow)
+  const workModeToken = socket.handshake?.auth?.workModeToken;
+  if (typeof workModeToken === 'string' && workModeToken.length > 10) {
+    socket.data.workModeOnly = true;
+    return next();
+  }
+
+  // All other sockets must provide a valid JWT access token
+  const token = socket.handshake?.auth?.token
+    || socket.handshake?.headers?.cookie
+        ?.split(';')
+        .find(c => c.trim().startsWith('accessToken='))
+        ?.split('=')[1];
+
+  if (!token) return next(new Error('AUTH_REQUIRED'));
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET, {
+      algorithms: ['HS256'],
+      issuer: 'bookiify-api',
+      audience: 'bookiify-app',
+    });
+    socket.data.userId = decoded.id;
+    socket.data.role   = decoded.role;
+    next();
+  } catch {
+    next(new Error('AUTH_INVALID'));
+  }
+});
+
 io.on('connection', (socket) => {
-  // Optional Work Mode capability token (no login flow)
-  // The client can pass `auth: { workModeToken }` in io() options.
   socket.data.workMode = null;
-  const token = socket.handshake?.auth?.workModeToken;
-  if (typeof token === 'string' && token.length > 10) {
-    // Lazy import to avoid circular deps (middleware uses models)
+
+  // Work mode token resolution (after connection, non-blocking)
+  const workModeToken = socket.handshake?.auth?.workModeToken;
+  if (socket.data.workModeOnly && typeof workModeToken === 'string') {
     import('./middleware/workModeToken.js')
-      .then(({ verifyWorkModeInvite }) => verifyWorkModeInvite(token))
-      .then((verified) => {
-        if (verified) socket.data.workMode = verified;
-      })
+      .then(({ verifyWorkModeInvite }) => verifyWorkModeInvite(workModeToken))
+      .then((verified) => { if (verified) socket.data.workMode = verified; })
       .catch(() => {});
   }
 
@@ -267,14 +354,16 @@ io.on('connection', (socket) => {
     if (typeof room === 'string' && room.length < 200) socket.leave(room);
   });
 
-  // Personal notification room (owner joins as "user:<userId>")
+  // Personal notification room — only allow joining your own userId room
   socket.on('user:join', ({ userId }) => {
-    if (typeof userId === 'string' && userId.length > 0) socket.join(`user:${userId}`);
+    if (typeof userId === 'string' && userId === socket.data.userId) {
+      socket.join(`user:${userId}`);
+    }
   });
 
-  // Chat room join / leave
+  // Chat room join / leave — only authenticated users
   socket.on('chat:join', ({ roomId }) => {
-    if (typeof roomId === 'string') socket.join(`chat:${roomId}`);
+    if (typeof roomId === 'string' && socket.data.userId) socket.join(`chat:${roomId}`);
   });
   socket.on('chat:leave', ({ roomId }) => {
     if (typeof roomId === 'string') socket.leave(`chat:${roomId}`);
@@ -282,7 +371,7 @@ io.on('connection', (socket) => {
 
   // Typing indicator relay
   socket.on('chat:typing', ({ roomId, senderName, isTyping }) => {
-    if (typeof roomId === 'string') {
+    if (typeof roomId === 'string' && socket.data.userId) {
       socket.to(`chat:${roomId}`).emit('chat:typing', { senderName, isTyping });
     }
   });

@@ -28,8 +28,7 @@ export const verifyWorkModeInvite = async (token) => {
 
 export const workModeInviteGuard = async (req, res, next) => {
   const auth = String(req.headers.authorization || '');
-  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null;
-  const token = bearer || req.query.token || req.body?.token;
+  const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null;
   const verified = await verifyWorkModeInvite(token);
   if (!verified) {
     logSecurityEvent({

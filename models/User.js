@@ -138,10 +138,10 @@ const UserSchema = new mongoose.Schema({
   },
 
   // --- 7. APP SETTINGS & METADATA ---
-  accountStatus: { 
-    type: String, 
-    enum: ['active', 'suspended', 'on_boarding', 'review'], 
-    default: 'on_boarding' 
+  accountStatus: {
+    type: String,
+    enum: ['active', 'suspended', 'on_boarding', 'pending_kyc', 'review', 'rejected'],
+    default: 'pending_kyc'
   },
   lastLogin: { type: Date },
   fcmToken: { type: String }, 
@@ -158,8 +158,17 @@ const UserSchema = new mongoose.Schema({
   }],
 
   // --- 9. WORK MODE: Worker invite link rotation ---
-  // The owner can rotate this nonce to instantly invalidate old worker links.
   workModeInviteNonce: { type: Number, default: 0 },
+
+  // --- 9b. PASSWORD RESET ---
+  passwordResetToken:   { type: String, select: false },
+  passwordResetExpires: { type: Date,   select: false },
+
+  // --- 9c. TWO-FACTOR AUTHENTICATION (TOTP) ---
+  twoFactor: {
+    enabled: { type: Boolean, default: false },
+    secret:  { type: String,  select: false },
+  },
 
   // --- 10. NOTIFICATION PREFERENCES ---
   notificationPrefs: {
