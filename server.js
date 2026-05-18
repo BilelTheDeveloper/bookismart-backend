@@ -124,8 +124,14 @@ app.use(helmet({
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 
-// Defense-in-depth: strip MongoDB operators from all inputs
-app.use(mongoSanitize({ replaceWith: '_' }));
+// Defense-in-depth: strip MongoDB operators from body/params.
+// express-mongo-sanitize tries to overwrite req.query which is a read-only
+// getter in Express 5 — bypass the middleware and call sanitize() directly.
+app.use((req, res, next) => {
+  if (req.body)   req.body   = mongoSanitize.sanitize(req.body,   { replaceWith: '_' });
+  if (req.params) req.params = mongoSanitize.sanitize(req.params, { replaceWith: '_' });
+  next();
+});
 
 // Force HTTPS in production
 if (process.env.NODE_ENV === 'production') {
