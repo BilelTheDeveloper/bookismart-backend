@@ -869,3 +869,168 @@ export const sendReviewRequest = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to send review request.' });
   }
 };
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   STAFF PORTAL — BOOKING FUNCTIONS
+   All functions scope to req.staff.ownerId (set by staffProtect middleware).
+   ───────────────────────────────────────────────────────────────────────────── */
+
+export const staffGetServices = async (req, res) => {
+  try {
+    const ownerId = req.staff.ownerId;
+    const website = await Website.findOne({ ownerId });
+    if (!website) return res.status(404).json({ success: false, message: 'Business website not found.' });
+    res.json({
+      success: true,
+      data: {
+        services: website.services.filter(s => s.active !== false),
+        businessHours: website.businessHours,
+        setupConfig: website.setupConfig,
+      },
+    });
+  } catch (err) {
+    console.error('[STAFF_SERVICES_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Failed to load services.' });
+  }
+};
+
+export const staffGetSlots = async (req, res) => {
+  try {
+    const ownerId = req.staff.ownerId;
+    const { date, duration } = req.query;
+    if (!date) return res.status(400).json({ success: false, message: 'Date is required.' });
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const requestedDate = new Date(date); requestedDate.setHours(0, 0, 0, 0);
+    if (requestedDate < today) return res.status(400).json({ success: false, message: 'Cannot book in the past.' });
+
+    const website = await Website.findOne({ ownerId });
+    if (!website) return res.status(404).json({ success: false, message: 'Business not found.' });
+
+    const dayConfig = resolveHoursForDate(website, date);
+    if (!dayConfig || dayConfig.isClosed) {
+      return res.json({ success: true, data: { date, isClosed: true, slots: [] } });
+    }
+
+    const serviceDuration = parseInt(duration) || 30;
+    const setupConfig = website.setupConfig || {};
+    const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
+    const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
+    const pauseWindows = (setupConfig.pauseWindows || []).filter(p => p?.start && p?.end && p.start < p.end);
+    const serviceBufferMap = buildServiceBufferMap(website);
+    const allSlots = generateTimeSlots(dayConfig.open, dayConfig.close, serviceDuration);
+
+    const bookedSlots = await Booking.find({
+      ownerId, dateString: date, status: { $in: ['pending', 'confirmed'] },
+    }).select('timeSlot service.duration service.title');
+
+    const isFullyBooked = bookedSlots.length >= maxCustomersPerDay;
+
+    const slots = allSlots.map(time => {
+      const cStart = toMinutes(time);
+      const cEnd = cStart + serviceDuration;
+      if (isInPauseWindow({ candidateStart: cStart, candidateEnd: cEnd, pauseWindows })) return { time, available: false };
+      const hasConflict = bookedSlots.some(b => {
+        const eBuf = Math.max(restMinutes, serviceBufferMap[b.service?.title] || 0);
+        return hasIntervalConflict({ candidateStart: cStart, candidateEnd: cEnd, existingStart: toMinutes(b.timeSlot), existingDuration: parseInt(b?.service?.duration) || 30, restMinutes: eBuf });
+      });
+      return { time, available: !isFullyBooked && !hasConflict };
+    });
+
+    res.json({ success: true, data: { date, isClosed: false, open: dayConfig.open, close: dayConfig.close, slots } });
+  } catch (err) {
+    console.error('[STAFF_SLOTS_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Failed to load slots.' });
+  }
+};
+
+export const staffListBookings = async (req, res) => {
+  try {
+    const ownerId = req.staff.ownerId;
+    const { date } = req.query;
+    const query = { ownerId };
+    if (date) query.dateString = date;
+    const bookings = await Booking.find(query)
+      .sort({ dateString: 1, timeSlot: 1 })
+      .select('customerName customerPhone customerEmail service dateString timeSlot status notes createdAt');
+    res.json({ success: true, data: bookings });
+  } catch (err) {
+    console.error('[STAFF_LIST_BOOKINGS_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Failed to load bookings.' });
+  }
+};
+
+export const staffCreateWalkin = async (req, res) => {
+  try {
+    const ownerId = req.staff.ownerId;
+    const { customerName, customerEmail, customerPhone, service, date, timeSlot, notes } = req.body;
+
+    if (!customerName || !customerPhone || !service || !date || !timeSlot) {
+      return res.status(400).json({ success: false, message: 'Name, phone, service, date and time are required.' });
+    }
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const bookingDate = new Date(date); bookingDate.setHours(0, 0, 0, 0);
+    if (bookingDate < today) return res.status(400).json({ success: false, message: 'Cannot book in the past.' });
+
+    const conflict = await Booking.findOne({ ownerId, dateString: date, timeSlot, status: { $in: ['pending', 'confirmed'] } });
+    if (conflict) return res.status(409).json({ success: false, message: 'This time slot is already taken.', code: 'SLOT_CONFLICT' });
+
+    const website = await Website.findOne({ ownerId });
+    const setupConfig = website?.setupConfig || {};
+    const restMinutes = Math.max(0, parseInt(setupConfig.restMinutesBetweenConsultations) || 0);
+    const maxCustomersPerDay = Math.max(1, parseInt(setupConfig.maxCustomersPerDay) || 25);
+    const pauseWindows = (setupConfig.pauseWindows || []).filter(p => p?.start && p?.end && p.start < p.end);
+    const serviceBufferMap = buildServiceBufferMap(website);
+    const dayConfig = resolveHoursForDate(website, date);
+
+    if (!dayConfig || dayConfig.isClosed) {
+      return res.status(400).json({ success: false, message: 'Business is closed on the selected date.' });
+    }
+
+    const serviceDuration = parseInt(service?.duration) || 30;
+    const candidateStart = toMinutes(timeSlot);
+    const candidateEnd = candidateStart + serviceDuration;
+
+    if (isInPauseWindow({ candidateStart, candidateEnd, pauseWindows })) {
+      return res.status(400).json({ success: false, message: 'Selected time falls inside a pause window.' });
+    }
+
+    const activeBookings = await Booking.find({ ownerId, dateString: date, status: { $in: ['pending', 'confirmed'] } })
+      .select('timeSlot service.duration service.title');
+
+    if (activeBookings.length >= maxCustomersPerDay) {
+      return res.status(409).json({ success: false, message: 'Maximum customers reached for this day.', code: 'DAILY_LIMIT_REACHED' });
+    }
+
+    const overlaps = activeBookings.some(b => {
+      const eBuf = Math.max(restMinutes, serviceBufferMap[b.service?.title] || 0);
+      return hasIntervalConflict({ candidateStart, candidateEnd, existingStart: toMinutes(b.timeSlot), existingDuration: parseInt(b?.service?.duration) || 30, restMinutes: eBuf });
+    });
+    if (overlaps) return res.status(409).json({ success: false, message: 'This slot conflicts with another appointment.', code: 'SLOT_CONFLICT' });
+
+    const resolvedEmail = customerEmail?.trim()
+      ? customerEmail.toLowerCase().trim()
+      : `walkin-${Date.now()}@walkin.internal`;
+
+    const booking = await Booking.create({
+      ownerId,
+      merchantId: ownerId,
+      customerName: customerName.trim(),
+      customerEmail: resolvedEmail,
+      customerPhone: customerPhone.trim(),
+      service: { title: service.title, price: service.price || 'N/A', duration: serviceDuration },
+      appointmentDate: new Date(`${date}T${timeSlot}:00`),
+      dateString: date,
+      timeSlot,
+      dayOfWeek: getDayName(date),
+      notes: notes?.trim() || '',
+      status: 'confirmed',
+    });
+
+    res.status(201).json({ success: true, data: booking, message: 'Walk-in booking created.' });
+  } catch (err) {
+    console.error('[STAFF_WALKIN_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Failed to create walk-in booking.' });
+  }
+};

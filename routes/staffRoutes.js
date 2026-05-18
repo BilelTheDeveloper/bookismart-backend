@@ -16,6 +16,9 @@ import {
   /* Admin */
   getAdminStaff, reviewStaffKYC,
 } from '../controllers/staffController.js';
+import {
+  staffGetServices, staffGetSlots, staffListBookings, staffCreateWalkin,
+} from '../controllers/bookingController.js';
 
 /* ─── Public registration flow (no auth) ─── */
 export const publicStaffRouter = express.Router();
@@ -32,8 +35,12 @@ publicStaffRouter.post('/portal/refresh',                  refreshStaffToken);
 /* ─── Staff portal routes (staff JWT required) ─── */
 export const portalStaffRouter = express.Router();
 
-portalStaffRouter.post('/logout',   staffProtect, staffLogout);
-portalStaffRouter.get('/me',        staffProtect, getStaffMe);
+portalStaffRouter.post('/logout',         staffProtect, staffLogout);
+portalStaffRouter.get('/me',              staffProtect, getStaffMe);
+portalStaffRouter.get('/booking-services', staffProtect, staffGetServices);
+portalStaffRouter.get('/booking-slots',    staffProtect, staffGetSlots);
+portalStaffRouter.get('/bookings',         staffProtect, staffListBookings);
+portalStaffRouter.post('/bookings',        staffProtect, staffCreateWalkin);
 
 /* ─── Owner management routes (owner JWT required) ─── */
 export const ownerStaffRouter = express.Router();
