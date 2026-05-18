@@ -1,5 +1,5 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { protect, requireRole } from '../middleware/authMiddleware.js';
 import {
   getSettings,
@@ -16,7 +16,7 @@ router.use(protect, requireRole('owner'));
 const passwordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req),
   message: { success: false, message: 'Too many password change attempts. Try again in 1 hour.' },
 });
 

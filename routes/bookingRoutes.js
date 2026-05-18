@@ -1,5 +1,5 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import {
   getBookingInfo,
   getAvailableSlots,
@@ -22,7 +22,7 @@ const publicBookingRouter = express.Router();
 const createBookingLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 8,
-  keyGenerator: (req) => `${req.ip}:${req.params.merchantId}`,
+  keyGenerator: (req) => `${ipKeyGenerator(req)}:${req.params.merchantId}`,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many booking attempts. Please try again later.' },
