@@ -1,4 +1,5 @@
-import { authenticator } from 'otplib';
+import { createRequire } from 'module';
+const { authenticator } = createRequire(import.meta.url)('otplib');
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
