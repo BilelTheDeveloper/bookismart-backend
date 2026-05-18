@@ -13,7 +13,7 @@ import crypto from 'crypto';
 import { redis } from '../config/redis.js';
 import { generateCsrfToken } from '../middleware/csrfProtection.js';
 import { logSecurityEvent } from '../utils/securityEventLogger.js';
-import { sendEmail } from '../utils/emailService.js';
+import { sendEmail, sendStatusEmail } from '../utils/emailService.js';
 import { logActivity } from '../utils/activityLogger.js';
 
 const OTP_TTL_SECONDS = 10 * 60;
@@ -545,7 +545,9 @@ export const verifyMe = async (req, res) => {
         email: user.email,
         role: user.role,
         accountStatus: user.accountStatus,
-        businessName: user.businessName
+        businessName: user.businessName,
+        kycStatus: user.kyc?.status,
+        trialEndsAt: user.paymentInfo?.subscription?.trialEndsAt ?? null,
       }
     });
   } catch (err) {
@@ -677,8 +679,11 @@ export const reviewUser = async (req, res) => {
       user.accountStatus = 'active';
       user.kyc.status = 'verified';
       user.kyc.verifiedAt = Date.now();
+      user.paymentInfo.subscription.trialEndsAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+      user.paymentInfo.subscription.plan = 'free_trial';
+      user.markModified('paymentInfo');
     } else if (action === 'reject') {
-      user.accountStatus = 'on_boarding'; 
+      user.accountStatus = 'on_boarding';
       user.kyc.status = 'rejected';
       user.kyc.rejectionReason = reason || "Documents did not meet requirements.";
     } else {
@@ -686,6 +691,14 @@ export const reviewUser = async (req, res) => {
     }
 
     await user.save();
+
+    sendStatusEmail(
+      user.email,
+      user.fullName,
+      action === 'approve' ? 'active' : 'rejected',
+      reason || ''
+    ).catch(() => {});
+
     res.json({ success: true, message: `User account has been ${action}ed successfully.` });
   } catch (err) {
     res.status(500).json({ success: false, message: "Review update failed" });
