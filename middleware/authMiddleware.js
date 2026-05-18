@@ -11,7 +11,7 @@ import { logSecurityEvent } from '../utils/securityEventLogger.js';
 /** * ✅ FIX: Added 'on_boarding' and 'review' to allowed statuses. 
  * If these aren't here, the user is blocked before they can even see the onboarding page.
  */
-const ALLOWED_ACCOUNT_STATUSES = ['active', 'on_boarding', 'review'];
+const ALLOWED_ACCOUNT_STATUSES = ['active', 'on_boarding', 'review', 'pending_kyc', 'rejected'];
 
 /**
  * In-memory fingerprint mismatch tracker.
