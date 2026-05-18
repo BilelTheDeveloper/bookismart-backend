@@ -27,6 +27,11 @@ const CustomerSchema = new mongoose.Schema({
   ownerId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   businessName: { type: String }, // denormalized snapshot for admin view
 
+  // Invite configuration
+  requireKyc:   { type: Boolean, default: true },
+  profileStepDone: { type: Boolean, default: false },
+  openedAt:     { type: Date },
+
   // Magic-link token for the registration journey
   registrationToken:       { type: String },
   registrationTokenExpiry: { type: Date },
@@ -48,7 +53,7 @@ const CustomerSchema = new mongoose.Schema({
   // rejected      → admin rejected
   status: {
     type: String,
-    enum: ['invited', 'pending_kyc', 'under_review', 'active', 'rejected'],
+    enum: ['invited', 'opened', 'pending_kyc', 'under_review', 'active', 'rejected', 'expired'],
     default: 'invited',
   },
   rejectionReason: { type: String },

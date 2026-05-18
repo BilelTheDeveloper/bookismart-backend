@@ -4,6 +4,7 @@ import { customerProtect } from '../middleware/customerAuth.js';
 import {
   initiateCustomer,
   getRegistrationInfo,
+  submitCustomerProfile,
   verifyOTP,
   resendOTP,
   setPassword,
@@ -25,6 +26,7 @@ import {
 export const publicCustomerRouter = express.Router();
 
 publicCustomerRouter.get('/register/:token',                    getRegistrationInfo);
+publicCustomerRouter.post('/register/:token/profile',           submitCustomerProfile);
 publicCustomerRouter.post('/register/:token/verify-otp',        verifyOTP);
 publicCustomerRouter.post('/register/:token/resend-otp',        resendOTP);
 publicCustomerRouter.post('/register/:token/set-password',      setPassword);

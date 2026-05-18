@@ -30,67 +30,61 @@ const uploadBase64 = async (dataUrl, folder) => {
 export const initiateCustomer = async (req, res) => {
   try {
     const owner = req.user;
-    const { fullName, phone, email, profilePictureBase64 } = req.body;
+    const { fullName, phone, email, requireKyc = true, profilePictureBase64 } = req.body;
 
     if (!fullName || !phone || !email) {
       return res.status(400).json({ success: false, message: 'Full name, phone and email are required.' });
     }
 
-    // Check if customer already exists for this owner
     const exists = await Customer.findOne({ email: email.toLowerCase(), ownerId: owner._id });
-    if (exists && exists.status !== 'rejected') {
+    const reInvite = exists && ['rejected', 'expired'].includes(exists.status);
+
+    if (exists && !reInvite) {
       return res.status(409).json({ success: false, message: 'A client with this email already exists in your account.' });
     }
 
-    // Upload profile picture if provided
     let profilePictureUrl = null;
     if (profilePictureBase64) {
       profilePictureUrl = await uploadBase64(profilePictureBase64, 'bookiify/customer-profiles');
     }
 
-    // Generate OTP and registration token
-    const otpCode = generateOTP();
     const registrationToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 min
-    const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-
-    // Upsert: if previously rejected, reset and reuse
     let customer;
-    if (exists && exists.status === 'rejected') {
+    if (reInvite) {
       exists.fullName = fullName;
       exists.phone = phone;
       exists.profilePicture = profilePictureUrl || exists.profilePicture;
       exists.businessName = owner.businessName;
+      exists.requireKyc = Boolean(requireKyc);
       exists.registrationToken = registrationToken;
       exists.registrationTokenExpiry = tokenExpiry;
-      exists.otpCode = otpCode;
-      exists.otpExpiry = otpExpiry;
+      exists.profileStepDone = false;
+      exists.openedAt = undefined;
+      exists.otpCode = undefined;
+      exists.otpExpiry = undefined;
       exists.status = 'invited';
       exists.rejectionReason = undefined;
       customer = await exists.save();
     } else {
       customer = await Customer.create({
-        fullName,
-        phone,
-        email,
+        fullName, phone, email,
         profilePicture: profilePictureUrl,
         ownerId: owner._id,
         businessName: owner.businessName,
+        requireKyc: Boolean(requireKyc),
         registrationToken,
         registrationTokenExpiry: tokenExpiry,
-        otpCode,
-        otpExpiry,
         status: 'invited',
       });
     }
 
-    // Send invitation email
     const registerLink = `${process.env.CLIENT_URL}/customer/register/${registrationToken}`;
     await sendEmail({
       to: email,
       subject: `${owner.businessName} — Complete Your Client Registration`,
-      html: buildInviteEmail({ fullName, businessName: owner.businessName, registerLink, otpCode }),
+      html: buildInviteEmail({ fullName, businessName: owner.businessName, registerLink }),
     });
 
     res.status(201).json({
@@ -102,7 +96,6 @@ export const initiateCustomer = async (req, res) => {
         email: customer.email,
         status: customer.status,
         registerLink,
-        otpCode,
       },
     });
   } catch (err) {
@@ -119,13 +112,17 @@ export const getRegistrationInfo = async (req, res) => {
   try {
     const { token } = req.params;
     const customer = await Customer.findOne({ registrationToken: token })
-      .select('fullName email businessName status registrationTokenExpiry profilePicture');
+      .select('fullName email phone businessName status registrationTokenExpiry profilePicture profileStepDone requireKyc openedAt ownerId');
 
     if (!customer) {
       return res.status(404).json({ success: false, message: 'Invalid or expired registration link.', code: 'TOKEN_INVALID' });
     }
 
     if (new Date() > customer.registrationTokenExpiry) {
+      if (['invited', 'opened'].includes(customer.status)) {
+        customer.status = 'expired';
+        await customer.save();
+      }
       return res.status(410).json({ success: false, message: 'This registration link has expired. Please contact your service provider.', code: 'TOKEN_EXPIRED' });
     }
 
@@ -133,24 +130,83 @@ export const getRegistrationInfo = async (req, res) => {
       return res.status(200).json({ success: true, alreadyActive: true, message: 'Your account is already active.' });
     }
 
+    if (!customer.openedAt) {
+      customer.openedAt = new Date();
+      customer.status = 'opened';
+      await customer.save();
+    }
+
     const stageMap = {
-      invited: 'otp',
-      pending_kyc: 'kyc',
+      invited:      customer.profileStepDone ? 'otp' : 'profile',
+      opened:       customer.profileStepDone ? 'otp' : 'profile',
+      pending_kyc:  customer.requireKyc ? 'kyc' : 'submitted',
       under_review: 'submitted',
     };
+
+    const owner = await User.findById(customer.ownerId).select('businessName fullName');
 
     res.json({
       success: true,
       data: {
-        fullName: customer.fullName,
-        email: customer.email,
-        businessName: customer.businessName,
+        fullName:     customer.fullName,
+        email:        customer.email,
+        phone:        customer.phone,
         profilePicture: customer.profilePicture,
-        stage: stageMap[customer.status] || 'otp',
+        requireKyc:   customer.requireKyc,
+        businessName: customer.businessName || owner?.businessName || owner?.fullName || 'Bookiify',
+        stage:        stageMap[customer.status] || 'profile',
       },
     });
   } catch (err) {
     console.error('[getRegistrationInfo]', err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────
+   PUBLIC: Submit profile step (Step 1)
+   POST /api/customer/register/:token/profile
+   ───────────────────────────────────────────────────────────── */
+export const submitCustomerProfile = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const customer = await Customer.findOne({ registrationToken: token });
+
+    if (!customer || !['invited', 'opened'].includes(customer.status)) {
+      return res.status(404).json({ success: false, message: 'Invalid or expired registration link.' });
+    }
+
+    if (new Date() > customer.registrationTokenExpiry) {
+      return res.status(410).json({ success: false, message: 'This link has expired.', code: 'TOKEN_EXPIRED' });
+    }
+
+    const { fullName, phone, profilePicBase64 } = req.body;
+    if (!fullName?.trim()) return res.status(400).json({ success: false, message: 'Full name is required.' });
+
+    customer.fullName = fullName.trim();
+    if (phone) customer.phone = phone.trim();
+
+    if (profilePicBase64) {
+      const url = await uploadBase64(profilePicBase64, 'bookiify/customer-profiles');
+      if (url) customer.profilePicture = url;
+    }
+
+    const otpCode = generateOTP();
+    customer.otpCode = otpCode;
+    customer.otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
+    customer.profileStepDone = true;
+    await customer.save();
+
+    const businessName = customer.businessName || 'Bookiify';
+    sendEmail({
+      to: customer.email,
+      subject: `${businessName} — Your Verification Code`,
+      html: buildResendOtpEmail({ fullName: customer.fullName, businessName, otpCode }),
+    }).catch(() => {});
+
+    res.json({ success: true, message: 'Profile saved. Verification code sent to your email.' });
+  } catch (err) {
+    console.error('[submitCustomerProfile]', err);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 };
@@ -172,7 +228,7 @@ export const verifyOTP = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Invalid or expired link.' });
     }
 
-    if (customer.status !== 'invited') {
+    if (!['invited', 'opened'].includes(customer.status)) {
       return res.status(400).json({ success: false, message: 'OTP already verified.' });
     }
 
@@ -220,7 +276,7 @@ export const resendOTP = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Invalid or expired link.' });
     }
 
-    if (customer.status !== 'invited') {
+    if (!['invited', 'opened'].includes(customer.status)) {
       return res.status(400).json({ success: false, message: 'OTP step already passed.' });
     }
 
@@ -272,12 +328,12 @@ export const setPassword = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Invalid or expired link.' });
     }
 
-    // Must have verified OTP first (otpCode cleared = verified)
-    if (customer.status === 'invited' && customer.otpCode) {
+    // Must have verified OTP first (otpCode cleared = OTP step done)
+    if (['invited', 'opened'].includes(customer.status) && customer.otpCode) {
       return res.status(400).json({ success: false, message: 'Please verify your OTP first.' });
     }
 
-    if (!['invited', 'pending_kyc'].includes(customer.status)) {
+    if (!['invited', 'opened', 'pending_kyc'].includes(customer.status)) {
       return res.status(400).json({ success: false, message: 'Password already set.' });
     }
 
@@ -314,6 +370,10 @@ export const submitKYC = async (req, res) => {
 
     if (customer.status !== 'pending_kyc') {
       return res.status(400).json({ success: false, message: 'KYC already submitted or prerequisites not met.' });
+    }
+
+    if (!customer.requireKyc) {
+      return res.status(400).json({ success: false, message: 'KYC is not required for this account.' });
     }
 
     // Upload all three to Cloudinary in parallel
@@ -685,7 +745,7 @@ export const getCustomerLoyalty = async (req, res) => {
    EMAIL TEMPLATES
    ───────────────────────────────────────────────────────────── */
 
-function buildInviteEmail({ fullName, businessName, registerLink, otpCode }) {
+function buildInviteEmail({ fullName, businessName, registerLink }) {
   return `<!DOCTYPE html><html><head><style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',sans-serif;background:#f8fafc;padding:40px 20px}
@@ -696,10 +756,10 @@ function buildInviteEmail({ fullName, businessName, registerLink, otpCode }) {
     .body{padding:40px}
     .title{font-size:24px;font-weight:900;color:#0f172a;margin-bottom:12px}
     .sub{color:#64748b;font-size:15px;line-height:1.6;margin-bottom:32px}
-    .otp-box{background:#f5f3ff;border:2px dashed #c4b5fd;border-radius:16px;padding:24px;text-align:center;margin-bottom:32px}
-    .otp-label{font-size:11px;font-weight:800;color:#7c3aed;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px}
-    .otp-code{font-size:48px;font-weight:900;color:#4f46e5;letter-spacing:12px}
-    .otp-expire{font-size:12px;color:#94a3b8;margin-top:8px}
+    .steps{background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:20px 24px;margin-bottom:32px}
+    .step{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:13px;color:#475569}
+    .step:last-child{border:none}
+    .step-num{width:24px;height:24px;background:#4f46e5;color:#fff;border-radius:50%;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
     .btn{display:block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff!important;padding:18px 32px;border-radius:14px;text-decoration:none;font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:24px}
     .footer{padding:24px 40px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;text-align:center}
   </style></head><body>
@@ -707,14 +767,15 @@ function buildInviteEmail({ fullName, businessName, registerLink, otpCode }) {
     <div class="header"><div class="logo">BOOKIIFY<span>.</span></div></div>
     <div class="body">
       <div class="title">You've been invited,<br/>${fullName}!</div>
-      <p class="sub"><strong>${businessName}</strong> has created a client profile for you on Bookiify. Complete your registration below to access your personal portal.</p>
-      <div class="otp-box">
-        <div class="otp-label">Your Verification Code</div>
-        <div class="otp-code">${otpCode}</div>
-        <div class="otp-expire">Valid for 15 minutes</div>
+      <p class="sub"><strong>${businessName}</strong> has created a client profile for you on Bookiify. Complete your secure registration in 4 quick steps to access your personal portal.</p>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><span>Confirm your profile &amp; photo</span></div>
+        <div class="step"><div class="step-num">2</div><span>Verify your email with a one-time code</span></div>
+        <div class="step"><div class="step-num">3</div><span>Create your secure password</span></div>
+        <div class="step"><div class="step-num">4</div><span>Submit your identity documents</span></div>
       </div>
-      <a href="${registerLink}" class="btn">Complete Registration →</a>
-      <p style="font-size:13px;color:#94a3b8">If the button doesn't work, paste this link: <br/><span style="color:#4f46e5;word-break:break-all">${registerLink}</span></p>
+      <a href="${registerLink}" class="btn">Start Registration →</a>
+      <p style="font-size:13px;color:#94a3b8">If the button doesn't work, paste this link:<br/><span style="color:#4f46e5;word-break:break-all">${registerLink}</span></p>
     </div>
     <div class="footer">© 2026 Bookiify. This invitation was sent on behalf of ${businessName}.</div>
   </div></body></html>`;

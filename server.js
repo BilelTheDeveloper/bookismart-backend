@@ -57,7 +57,12 @@ import {
   ownerRecruitmentRouter,
   adminRecruitmentRouter,
 } from './routes/recruitmentRoutes.js';
-import staffRoutes        from './routes/staffRoutes.js';
+import {
+  publicStaffRouter,
+  portalStaffRouter,
+  ownerStaffRouter,
+  adminStaffRouter,
+} from './routes/staffRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import searchRoutes       from './routes/searchRoutes.js';
 import customerNoteRoutes from './routes/customerNoteRoutes.js';
@@ -246,7 +251,10 @@ app.use('/api/merchant/recruitment',  ownerRecruitmentRouter);
 app.use('/api/admin/recruitment',     adminRecruitmentRouter);
 
 // Staff, Notifications, Chat
-app.use('/api/merchant/staff',         staffRoutes);
+app.use('/api/staff',                   publicStaffRouter);
+app.use('/api/staff/portal',           portalStaffRouter);
+app.use('/api/merchant/staff',         ownerStaffRouter);
+app.use('/api/admin/staff',            adminStaffRouter);
 app.use('/api/merchant/notifications', notificationRoutes);
 app.use('/api/merchant/chat',          chatRoutes);
 app.use('/api/merchant/search',        searchRoutes);
