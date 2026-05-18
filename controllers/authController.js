@@ -546,6 +546,7 @@ export const verifyMe = async (req, res) => {
         role: user.role,
         accountStatus: user.accountStatus,
         businessName: user.businessName,
+        category: user.category,
         kycStatus: user.kyc?.status,
         trialEndsAt: user.paymentInfo?.subscription?.trialEndsAt ?? null,
       }
