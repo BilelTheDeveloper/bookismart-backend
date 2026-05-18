@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-const { authenticator } = createRequire(import.meta.url)('otplib/preset-default');
+const { generateSecret, generateSync, verifySync, generateURI } = createRequire(import.meta.url)('otplib');
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -8,10 +8,8 @@ import { generateAccessAndRefreshTokens, getCookieOptions, getCsrfCookieOptions,
 import { generateCsrfToken } from '../middleware/csrfProtection.js';
 import { logSecurityEvent } from '../utils/securityEventLogger.js';
 
-// TOTP window: accept 1 step before/after to allow clock drift
-authenticator.options = { window: 1 };
-
 const APP_NAME = 'Bookiify';
+const TOTP_WINDOW = 1;
 
 /**
  * @desc  Generate a new TOTP secret and return the otpauth URI.
@@ -28,8 +26,8 @@ export const setup2FA = async (req, res) => {
       return res.status(400).json({ success: false, message: '2FA is already enabled on this account.' });
     }
 
-    const secret = authenticator.generateSecret(20);
-    const otpauthUri = authenticator.keyuri(user.email, APP_NAME, secret);
+    const secret = generateSecret();
+    const otpauthUri = generateURI({ label: user.email, issuer: APP_NAME, secret });
 
     // Store the pending secret temporarily in Redis (5 min) so we can verify it without
     // persisting to DB until the user proves they have it configured.
@@ -70,7 +68,7 @@ export const enable2FA = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Setup session expired. Please start 2FA setup again.' });
     }
 
-    const valid = authenticator.verify({ token: totpCode.trim(), secret: pendingSecret });
+    const valid = verifySync({ token: totpCode.trim(), secret: pendingSecret, window: TOTP_WINDOW });
     if (!valid) {
       return res.status(400).json({ success: false, message: 'Invalid TOTP code. Check your authenticator app.' });
     }
@@ -114,7 +112,7 @@ export const disable2FA = async (req, res) => {
     let verified = false;
 
     if (totpCode) {
-      verified = authenticator.verify({ token: String(totpCode).trim(), secret: user.twoFactor.secret });
+      verified = verifySync({ token: String(totpCode).trim(), secret: user.twoFactor.secret, window: TOTP_WINDOW });
     } else if (password) {
       verified = await bcrypt.compare(password, user.password);
     }
@@ -167,7 +165,7 @@ export const verify2FA = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid 2FA state.' });
     }
 
-    const valid = authenticator.verify({ token: String(totpCode).trim(), secret: user.twoFactor.secret });
+    const valid = verifySync({ token: String(totpCode).trim(), secret: user.twoFactor.secret, window: TOTP_WINDOW });
     if (!valid) {
       logSecurityEvent({ level: 'WARN', msg: '2FA verification failed', code: '2FA_VERIFY_FAIL', req, userId: user._id });
       return res.status(401).json({ success: false, message: 'Invalid authenticator code.' });
