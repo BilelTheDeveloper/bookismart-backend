@@ -1,4 +1,5 @@
-import { authenticator } from 'otplib';
+import otplib from 'otplib';
+const { authenticator } = otplib;
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
