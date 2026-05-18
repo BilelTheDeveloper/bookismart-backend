@@ -6,6 +6,8 @@ import User from '../models/User.js';
 import { redis } from '../config/redis.js';
 import { issueCustomerTokens } from '../middleware/customerAuth.js';
 import { sendEmail } from '../utils/emailService.js';
+import { generateCsrfToken } from '../middleware/csrfProtection.js';
+import { getCsrfCookieOptions } from '../utils/tokenService.js';
 
 /* ─────────────────────────────────────────────────────────────
    HELPERS
@@ -443,11 +445,13 @@ export const customerLogin = async (req, res) => {
 
     await issueCustomerTokens(customer, res, req);
 
-    const allowedPageKeys = customer.allowedPages.map(p => p.pageKey);
+    const csrfToken = generateCsrfToken();
+    res.cookie('csrfToken', csrfToken, { ...getCsrfCookieOptions(), maxAge: 7 * 24 * 60 * 60 * 1000 });
 
     res.json({
       success: true,
       message: 'Welcome back!',
+      csrfToken,
       customer: {
         id: customer._id,
         fullName: customer.fullName,

@@ -7,6 +7,12 @@ import Notification from '../models/Notification.js';
 import { sendEmail } from '../utils/emailService.js';
 import { issueStaffTokens } from '../middleware/staffAuth.js';
 import { redis } from '../config/redis.js';
+import { generateCsrfToken } from '../middleware/csrfProtection.js';
+import { getCsrfCookieOptions } from '../utils/tokenService.js';
+
+const setStaffCsrfCookie = (res, token) => {
+  res.cookie('csrfToken', token, { ...getCsrfCookieOptions(), maxAge: 7 * 24 * 60 * 60 * 1000 });
+};
 
 /* ─── Helpers ─── */
 const generateOTP  = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -585,9 +591,13 @@ export const staffLogin = async (req, res) => {
 
     await issueStaffTokens(staff, res, req);
 
+    const csrfToken = generateCsrfToken();
+    setStaffCsrfCookie(res, csrfToken);
+
     res.json({
       success: true,
       message: 'Login successful.',
+      csrfToken,
       staff: {
         id: staff._id,
         fullName: staff.fullName,
@@ -642,7 +652,9 @@ export const refreshStaffToken = async (req, res) => {
     staff.refreshTokens = staff.refreshTokens.filter(t => t.tokenHash !== refreshHash);
     await issueStaffTokens(staff, res, req);
 
-    res.json({ success: true });
+    const csrfToken = generateCsrfToken();
+    setStaffCsrfCookie(res, csrfToken);
+    res.json({ success: true, csrfToken });
   } catch (err) {
     console.error('[refreshStaffToken]', err);
     res.status(500).json({ success: false, message: 'Token refresh failed.' });

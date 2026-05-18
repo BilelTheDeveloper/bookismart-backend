@@ -7,9 +7,16 @@ const CSRF_SKIP_EXACT = new Set([
   '/api/auth/send-otp',
   '/api/auth/verify-otp',
   '/api/auth/refresh',
+  '/api/staff/login',
+  '/api/staff/portal/refresh',
+  '/api/customer/login',
 ]);
 
-const CSRF_SKIP_PREFIX = ['/api/public/'];
+const CSRF_SKIP_PREFIX = [
+  '/api/public/',
+  '/api/staff/register/',
+  '/api/customer/register/',
+];
 
 export const generateCsrfToken = () => crypto.randomBytes(32).toString('hex');
 
