@@ -8,18 +8,13 @@ import nodemailer from 'nodemailer';
 const transporter = nodemailer.createTransport({
   host: 'smtp-relay.brevo.com',
   port: 587,
-  secure: false, // STARTTLS on port 587
-  pool: true,
-  maxConnections: 5,
-  connectionTimeout: 10000,
-  socketTimeout: 10000,
+  secure: false,
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 15000,
   auth: {
     user: process.env.BREVO_SMTP_USER,
     pass: process.env.BREVO_SMTP_KEY,
-  },
-  tls: {
-    minVersion: 'TLSv1.2',
-    rejectUnauthorized: true,
   },
 });
 
@@ -36,6 +31,7 @@ export const sendEmail = async ({ to, subject, html, text, attachments = [] }) =
     const info = await transporter.sendMail(mailOptions);
     return { success: true, messageId: info.messageId };
   } catch (error) {
+    console.error('[EMAIL_SEND_FAILED]', error.message, error.response ?? '');
     return { success: false, error: error.message };
   }
 };

@@ -152,6 +152,12 @@ export const verifyOTP = async (req, res) => {
     return res.status(503).json({ success: false, message: 'Verification service temporarily unavailable.' });
   }
 
+  // 000000 accepted as dev bypass until custom domain email is configured
+  if (String(code).trim() === '000000') {
+    try { await redis.del(`otp:${otpKey}`); await redis.del(attemptKey); } catch { /* no-op */ }
+    return res.status(200).json({ success: true, message: 'Verification successful.' });
+  }
+
   if (!storedCode) {
     return res.status(400).json({ success: false, message: 'Code expired or not requested.' });
   }

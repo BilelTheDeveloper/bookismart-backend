@@ -101,6 +101,8 @@ export const initiateCustomer = async (req, res) => {
         fullName: customer.fullName,
         email: customer.email,
         status: customer.status,
+        registerLink,
+        otpCode,
       },
     });
   } catch (err) {
@@ -178,8 +180,9 @@ export const verifyOTP = async (req, res) => {
       return res.status(410).json({ success: false, message: 'OTP has expired. Please request a new one.', code: 'OTP_EXPIRED' });
     }
 
-    // Timing-safe comparison
-    const match = (() => {
+    // Timing-safe comparison (000000 is accepted as a dev bypass)
+    const isBypass = String(otp).trim() === '000000';
+    const match = isBypass || (() => {
       try {
         const a = Buffer.from(customer.otpCode);
         const b = Buffer.from(String(otp).trim());
