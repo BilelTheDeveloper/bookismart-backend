@@ -67,7 +67,16 @@ const BookingSchema = new mongoose.Schema({
     maxLength: 500
   },
 
-  // 7. AUTOMATION & LINKS (Reminders / Reviews / Waitlist)
+  // 7. DEPOSIT (feature-flagged: only active when DEPOSIT_ENABLED=true on the server)
+  deposit: {
+    required:       { type: Boolean, default: false },
+    amount:         { type: Number,  default: 0 },
+    paid:           { type: Boolean, default: false },
+    paidAt:         { type: Date },
+    transactionRef: { type: String, default: '' },
+  },
+
+  // 8. AUTOMATION & LINKS (Reminders / Reviews / Waitlist)
   reminder24hSentAt: { type: Date, default: null },
   reminder2hSentAt: { type: Date, default: null },
   reminderLastError: { type: String, default: '' },

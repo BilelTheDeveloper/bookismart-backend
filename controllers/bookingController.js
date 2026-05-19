@@ -5,6 +5,7 @@ import LoyaltyProgram from '../models/LoyaltyProgram.js';
 import CustomerLoyalty from '../models/CustomerLoyalty.js';
 import Invoice from '../models/Invoice.js';
 import { sendEmail } from '../utils/emailService.js';
+import { sendWhatsAppConfirmation, sendWhatsAppCancellation } from '../utils/messageProviders.js';
 
 const escHtml = (s) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -661,6 +662,34 @@ export const updateBookingStatus = async (req, res) => {
       _onBookingCompleted(ownerId, booking).catch((e) =>
         console.error('[COMPLETION_HOOK_ERROR]', e.message)
       );
+    }
+
+    // WhatsApp — confirmation and cancellation notifications
+    if (status === 'confirmed' && existing.status !== 'confirmed') {
+      const owner = await User.findById(ownerId).select('businessName fullName');
+      const businessName = owner?.businessName || owner?.fullName || 'Bookiify Pro';
+      sendWhatsAppConfirmation({
+        to: booking.customerPhone,
+        customerName: booking.customerName,
+        businessName,
+        service: booking.service?.title,
+        dateString: booking.dateString,
+        timeSlot: booking.timeSlot,
+        price: booking.service?.price,
+      }).catch((e) => console.error('[WA_CONFIRM_ERROR]', e.message));
+    }
+
+    if (status === 'cancelled' && existing.status !== 'cancelled') {
+      const owner = await User.findById(ownerId).select('businessName fullName');
+      const businessName = owner?.businessName || owner?.fullName || 'Bookiify Pro';
+      sendWhatsAppCancellation({
+        to: booking.customerPhone,
+        customerName: booking.customerName,
+        businessName,
+        service: booking.service?.title,
+        dateString: booking.dateString,
+        timeSlot: booking.timeSlot,
+      }).catch((e) => console.error('[WA_CANCEL_ERROR]', e.message));
     }
 
     res.status(200).json({ success: true, data: booking });
