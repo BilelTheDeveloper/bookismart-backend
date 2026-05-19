@@ -2,6 +2,7 @@ import Website from '../models/Website.js';
 import User from '../models/User.js';
 import Review from '../models/Review.js';
 import Booking from '../models/Booking.js';
+import Consultation from '../models/Consultation.js';
 import crypto from 'crypto';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -352,5 +353,68 @@ export const submitPublicReview = async (req, res) => {
     }
     console.error('[SUBMIT_REVIEW_ERROR]', err.message);
     res.status(500).json({ success: false, message: 'Could not submit review.' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. WAITING ROOM DISPLAY — public live queue screen
+// GET /public/display/:slug
+// Returns only non-confidential info: first name, position, time slot, duration
+// ─────────────────────────────────────────────────────────────────────────────
+export const getDisplayQueue = async (req, res) => {
+  try {
+    const { slug } = req.params;
+
+    const website = await Website.findOne({ slug }).select('ownerId hero name').lean();
+    if (!website) {
+      return res.status(404).json({ success: false, message: 'Display not found.' });
+    }
+
+    const ownerId   = website.ownerId;
+    const todayStr  = new Date().toISOString().slice(0, 10);
+
+    const consultations = await Consultation.find(
+      {
+        ownerId,
+        dateString: todayStr,
+        status: { $in: ['in_progress', 'waiting'] },
+      },
+      {
+        customerName:          1,
+        timeSlot:              1,
+        serviceDurationMinutes:1,
+        status:                1,
+        startedAt:             1,
+        remainingSeconds:      1,
+      }
+    )
+      .sort({ timeSlot: 1 })
+      .lean();
+
+    // Strip to first name only — privacy-safe
+    const queue = consultations.map((c, index) => ({
+      position:        index + 1,
+      firstName:       (c.customerName || '').trim().split(' ')[0] || '—',
+      timeSlot:        c.timeSlot,
+      durationMinutes: c.serviceDurationMinutes,
+      status:          c.status,
+      remainingSeconds:c.status === 'in_progress' ? (c.remainingSeconds ?? 0) : null,
+      startedAt:       c.status === 'in_progress' ? c.startedAt : null,
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        businessName: website.name || website.hero?.title || 'Bookiify',
+        todayStr,
+        serverTime:   new Date().toISOString(),
+        queue,
+        currentCount: queue.filter(q => q.status === 'in_progress').length,
+        waitingCount: queue.filter(q => q.status === 'waiting').length,
+      },
+    });
+  } catch (err) {
+    console.error('[DISPLAY_QUEUE_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Failed to load queue.' });
   }
 };
