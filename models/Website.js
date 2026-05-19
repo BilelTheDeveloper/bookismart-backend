@@ -50,11 +50,29 @@ const WebsiteSchema = new mongoose.Schema({
     active: { type: Boolean, default: true }
   }],
 
-  // --- 5. GALLERY SECTION ---
+  // --- 5. PRESENTATION REEL ---
+  // A short showcase video (max 30s) the owner can optionally add.
+  // Shown as a dedicated autoplay section on the public profile.
+  presentationReel: {
+    show:      { type: Boolean, default: false },
+    videoUrl:  { type: String,  default: '' },
+    publicId:  { type: String,  default: '' },   // Cloudinary public_id for deletion
+    title:     { type: String,  default: 'Notre savoir-faire en vidéo' },
+    subtitle:  { type: String,  default: '' },
+  },
+
+  // --- 6. GALLERY SECTION ---
   gallery: {
     show: { type: Boolean, default: true },
-    images: [{ type: String }] // Array of Cloudinary/S3 URLs
+    images: [{ type: String }]
   },
+
+  // --- 6b. BEFORE / AFTER GALLERY ---
+  beforeAfterGallery: [{
+    before:  { type: String, default: '' },
+    after:   { type: String, default: '' },
+    caption: { type: String, default: '', maxlength: 120 },
+  }],
 
   // --- 6. FOOTER & SOCIALS ---
   contact: {

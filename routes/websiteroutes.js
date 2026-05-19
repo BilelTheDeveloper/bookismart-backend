@@ -1,11 +1,13 @@
 import express from 'express';
-import { 
-  saveWebsite, 
+import {
+  saveWebsite,
   getMyWebsite,
-  uploadWebsiteImage // 🆕 Added for Cloudinary
+  uploadWebsiteImage,
+  uploadPresentationReel,
+  deletePresentationReel,
 } from '../controllers/websiteController.js';
 import { protect } from '../middleware/authMiddleware.js';
-import upload, { uploadGallery } from '../config/cloudinary.js';
+import upload, { uploadGallery, uploadReel } from '../config/cloudinary.js';
 
 const router = express.Router();
 
@@ -33,5 +35,12 @@ router.post('/upload/about', protect, upload.single('aboutImage'), uploadWebsite
 // --- 4. GALLERY BULK UPLOAD (up to 10 images) ---
 // FormData field: 'galleryImage' (array)
 router.post('/upload/gallery', protect, uploadGallery.array('galleryImage', 10), uploadWebsiteImage);
+
+// --- 5. PRESENTATION REEL UPLOAD (single video, max 30s enforced in controller) ---
+router.post('/upload/reel',   protect, uploadReel.single('presentationReel'), uploadPresentationReel);
+router.delete('/upload/reel', protect, deletePresentationReel);
+
+// --- 6. BEFORE / AFTER IMAGE UPLOAD ---
+router.post('/upload/beforeafter', protect, upload.single('beforeAfterImage'), uploadWebsiteImage);
 
 export default router;

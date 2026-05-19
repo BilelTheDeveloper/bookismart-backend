@@ -647,9 +647,14 @@ export const updateBookingStatus = async (req, res) => {
     }
     const wasAlreadyCompleted = existing.status === 'completed';
 
+    const statusUpdate = { status };
+    if (status === 'confirmed' && existing.status !== 'confirmed') {
+      statusUpdate.confirmedAt = new Date();
+    }
+
     const booking = await Booking.findOneAndUpdate(
       { _id: bookingId, ownerId },
-      { status },
+      statusUpdate,
       { new: true }
     );
 
@@ -859,36 +864,68 @@ export const sendReviewRequest = async (req, res) => {
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Completed booking not found.' });
     }
+    if (booking.reviewSubmittedAt) {
+      return res.status(409).json({ success: false, message: 'Customer already submitted a review.' });
+    }
 
     const owner = await User.findById(ownerId).select('businessName fullName');
     const businessName = owner?.businessName || owner?.fullName || 'Your service provider';
 
+    // Generate a secure one-time token
+    const token = (await import('crypto')).randomBytes(32).toString('hex');
+    booking.reviewToken       = token;
+    booking.reviewInviteSentAt = new Date();
+    await booking.save();
+
+    const reviewLink = `${process.env.CLIENT_URL || 'https://bookiify.vercel.app'}/review/${token}`;
     const eBusiness = escHtml(businessName);
+
     await sendEmail({
       to: booking.customerEmail,
-      subject: `How was your experience at ${businessName}? ⭐`,
+      subject: `Comment s'est passé votre visite chez ${businessName} ? ⭐`,
       html: `
-        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#f8fafc;padding:32px;border-radius:20px">
-          <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:16px;padding:28px;text-align:center;margin-bottom:24px">
-            <h1 style="color:#fff;margin:0;font-size:26px;font-weight:900">How Was Your Visit?</h1>
-            <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;font-size:14px">Share your experience with ${eBusiness}</p>
+        <!DOCTYPE html><html><head>
+        <style>
+          body{margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif}
+          .wrap{max-width:540px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;border:1px solid #e2e8f0}
+          .header{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);padding:36px 40px;text-align:center}
+          .stars{font-size:28px;letter-spacing:4px;margin-bottom:12px}
+          .h1{color:#fff;margin:0;font-size:26px;font-weight:900;letter-spacing:-0.5px}
+          .sub{color:rgba(255,255,255,0.75);font-size:14px;margin:8px 0 0}
+          .body{padding:36px 40px}
+          .card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:20px 24px;margin:24px 0;text-align:center}
+          .svc{color:#1e293b;font-weight:800;font-size:16px;margin:0 0 4px}
+          .at{color:#94a3b8;font-size:13px;margin:0}
+          .btn{display:block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff!important;text-decoration:none;font-weight:800;font-size:15px;padding:18px 32px;border-radius:16px;text-align:center;margin:28px 0;box-shadow:0 8px 24px -4px rgba(79,70,229,0.4)}
+          .note{color:#94a3b8;font-size:12px;text-align:center;line-height:1.6}
+          .footer{background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;font-size:11px;color:#94a3b8;text-align:center}
+        </style></head><body>
+        <div class="wrap">
+          <div class="header">
+            <div class="stars">⭐⭐⭐⭐⭐</div>
+            <h1 class="h1">Partagez votre avis</h1>
+            <p class="sub">Votre retour aide ${eBusiness} à s'améliorer</p>
           </div>
-          <p style="color:#475569;font-size:15px;line-height:1.6">Hi <strong>${escHtml(booking.customerName)}</strong>,</p>
-          <p style="color:#475569;font-size:15px;line-height:1.6">
-            Thank you for your recent appointment on <strong>${escHtml(booking.dateString)}</strong>.
-            We'd love to hear your feedback — it helps us improve and helps others find great service.
-          </p>
-          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:20px 0;text-align:center">
-            <p style="color:#1e293b;font-weight:700;margin:0 0 4px;font-size:16px">
-              ${escHtml(booking.service?.title || 'Your appointment')}
+          <div class="body">
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 16px">
+              Bonjour <strong>${escHtml(booking.customerName)}</strong>,
             </p>
-            <p style="color:#94a3b8;font-size:13px;margin:0">at ${eBusiness}</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0">
+              Merci pour votre rendez-vous du <strong>${escHtml(booking.dateString)}</strong>.
+              Votre avis compte — il aide d'autres clients à faire le bon choix et aide ${eBusiness} à grandir.
+            </p>
+            <div class="card">
+              <p class="svc">${escHtml(booking.service?.title || 'Votre rendez-vous')}</p>
+              <p class="at">chez ${eBusiness}</p>
+            </div>
+            <a href="${reviewLink}" class="btn">✍️ Laisser mon avis maintenant</a>
+            <p class="note">Ce lien est personnel et à usage unique. Il expirera une fois votre avis soumis.</p>
           </div>
-          <p style="color:#475569;font-size:14px;text-align:center;margin-top:24px">⭐ Rate 1–5 stars and leave a note. Every review matters.</p>
-          <p style="color:#94a3b8;font-size:12px;text-align:center;margin-top:32px">
-            This review request was sent by ${eBusiness} via Bookiify.
-          </p>
+          <div class="footer">
+            Envoyé par ${eBusiness} via Bookiify &mdash; Plateforme de réservation professionnelle en Tunisie
+          </div>
         </div>
+        </body></html>
       `,
     });
 

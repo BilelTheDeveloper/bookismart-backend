@@ -81,6 +81,8 @@ const BookingSchema = new mongoose.Schema({
   reminder2hSentAt: { type: Date, default: null },
   reminderLastError: { type: String, default: '' },
 
+  confirmedAt: { type: Date, default: null },
+
   reviewToken: { type: String, default: '', index: true },
   reviewInviteSentAt: { type: Date, default: null },
   reviewSubmittedAt: { type: Date, default: null },

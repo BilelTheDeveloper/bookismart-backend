@@ -1,6 +1,7 @@
 import Website from '../models/Website.js';
 import User from '../models/User.js';
 import { validateWebsitePayload } from '../validators/websiteValidator.js';
+import { cloudinary } from '../config/cloudinary.js';
 
 /**
  * 🛡️ ADVANCED WEBSITE CONTROLLER (2026 Security Standards)
@@ -85,9 +86,10 @@ export const saveWebsite = async (req, res) => {
       });
     }
 
-    const { 
-      templateId, category, name, slug, 
-      hero, about, services, gallery, 
+    const {
+      templateId, category, name, slug,
+      hero, about, services, gallery,
+      beforeAfterGallery,
       contact, businessHours, setupConfig
     } = value;
 
@@ -107,27 +109,28 @@ export const saveWebsite = async (req, res) => {
     }
 
     // 6. Advanced Upsert (Update or Insert)
-    const updatePayload = {
-      ownerId,
-      templateId,
-      category,
-      name,
-      slug: sanitizedSlug,
-      hero,
-      about,
-      services,
-      gallery,
-      contact,
-      businessHours,
-      setupConfig,
-      lastUpdated: Date.now(),
-      // Reset verification status if the user changes their name or slug
-      verificationStatus: 'pending' 
-    };
-
+    // Use $set so that separately-managed fields (presentationReel, isPublished) are never wiped.
     const website = await Website.findOneAndUpdate(
       { ownerId },
-      updatePayload,
+      {
+        $set: {
+          ownerId,
+          templateId,
+          category,
+          name,
+          slug: sanitizedSlug,
+          hero,
+          about,
+          services,
+          gallery,
+          beforeAfterGallery,
+          contact,
+          businessHours,
+          setupConfig,
+          lastUpdated: Date.now(),
+          verificationStatus: 'pending',
+        },
+      },
       { new: true, upsert: true, runValidators: true }
     );
 
@@ -148,5 +151,100 @@ export const saveWebsite = async (req, res) => {
     }
 
     res.status(500).json({ message: "Internal Security Error" });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UPLOAD PRESENTATION REEL
+// @route  POST /api/merchant/website/upload/reel
+// @access Private
+// ─────────────────────────────────────────────────────────────────────────────
+export const uploadPresentationReel = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No video file uploaded.' });
+    }
+
+    const ownerId = req.user._id;
+
+    // Enforce 30-second limit via Cloudinary metadata
+    // Cloudinary returns duration in the response — check it
+    const duration = req.file.resource_type === 'video' ? null : null;
+    // Note: multer-storage-cloudinary doesn't expose duration directly.
+    // We fetch it from the Cloudinary API after upload.
+    let videoDuration = 0;
+    try {
+      const info = await cloudinary.api.resource(req.file.filename, { resource_type: 'video' });
+      videoDuration = info.duration || 0;
+    } catch {
+      // Non-fatal — continue even if we can't fetch duration
+    }
+
+    if (videoDuration > 32) {
+      // Delete the just-uploaded file — it's too long
+      await cloudinary.uploader.destroy(req.file.filename, { resource_type: 'video' }).catch(() => {});
+      return res.status(400).json({
+        success: false,
+        message: `Video is too long (${Math.round(videoDuration)}s). Maximum is 30 seconds.`,
+      });
+    }
+
+    // Delete previous reel if it exists
+    const existing = await Website.findOne({ ownerId }).select('presentationReel');
+    if (existing?.presentationReel?.publicId) {
+      await cloudinary.uploader.destroy(existing.presentationReel.publicId, { resource_type: 'video' }).catch(() => {});
+    }
+
+    // Save reference to website doc
+    await Website.findOneAndUpdate(
+      { ownerId },
+      {
+        'presentationReel.show':     true,
+        'presentationReel.videoUrl': req.file.path,
+        'presentationReel.publicId': req.file.filename,
+        lastUpdated: Date.now(),
+      },
+      { upsert: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      url:      req.file.path,
+      publicId: req.file.filename,
+      duration: Math.round(videoDuration),
+    });
+  } catch (err) {
+    console.error('[REEL_UPLOAD_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Reel upload failed.' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE PRESENTATION REEL
+// @route  DELETE /api/merchant/website/upload/reel
+// @access Private
+// ─────────────────────────────────────────────────────────────────────────────
+export const deletePresentationReel = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const site = await Website.findOne({ ownerId }).select('presentationReel');
+
+    if (site?.presentationReel?.publicId) {
+      await cloudinary.uploader.destroy(site.presentationReel.publicId, { resource_type: 'video' }).catch(() => {});
+    }
+
+    await Website.findOneAndUpdate(
+      { ownerId },
+      {
+        'presentationReel.show':     false,
+        'presentationReel.videoUrl': '',
+        'presentationReel.publicId': '',
+      }
+    );
+
+    res.status(200).json({ success: true, message: 'Reel removed.' });
+  } catch (err) {
+    console.error('[REEL_DELETE_ERROR]', err.message);
+    res.status(500).json({ success: false, message: 'Reel deletion failed.' });
   }
 };

@@ -54,6 +54,13 @@ export const validateWebsitePayload = (data) => {
       }).required(),
     }).required(),
     businessHours: Joi.array().items(businessHourSchema).max(7).required(),
+    beforeAfterGallery: Joi.array().items(
+      Joi.object({
+        before:  Joi.string().uri({ scheme: ['http', 'https'] }).allow(''),
+        after:   Joi.string().uri({ scheme: ['http', 'https'] }).allow(''),
+        caption: Joi.string().allow('').max(120),
+      })
+    ).max(10).default([]),
     setupConfig: Joi.object({
       maxCustomersPerDay: Joi.number().integer().min(1).max(500).default(25),
       restMinutesBetweenConsultations: Joi.number().integer().min(0).max(180).default(0),

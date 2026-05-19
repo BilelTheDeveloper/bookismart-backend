@@ -37,6 +37,12 @@ const FIELD_CONFIG = {
 
   // Generic website image upload (legacy field name from websiteController)
   image: { folder: 'bookiify/website/assets',     transform: [{ width: 1920, crop: 'limit', quality: 'auto', fetch_format: 'auto' }] },
+
+  // Presentation reel — short showcase video (max 30s enforced in controller)
+  presentationReel: { folder: 'bookiify/website/reels', transform: [{ quality: 'auto', fetch_format: 'auto' }], isVideo: true },
+
+  // Before / After gallery images
+  beforeAfterImage: { folder: 'bookiify/website/beforeafter', transform: [{ width: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }] },
 };
 
 const DEFAULT_CONFIG = { folder: 'bookiify/misc', transform: [{ width: 1200, crop: 'limit', quality: 'auto' }] };
@@ -81,7 +87,9 @@ const FIELD_SIZE_LIMITS = {
   heroImage:          8  * 1024 * 1024,  // 8 MB — high-res banner
   aboutImage:         5  * 1024 * 1024,
   galleryImage:       5  * 1024 * 1024,  // per image in gallery
-  image:              8  * 1024 * 1024,  // generic website asset
+  image:              8  * 1024 * 1024,
+  beforeAfterImage:   6  * 1024 * 1024,
+  presentationReel:  80 * 1024 * 1024,
 };
 
 const fileFilter = (req, file, cb) => {
@@ -91,8 +99,9 @@ const fileFilter = (req, file, cb) => {
   }
 
   // 2. Block video files on image-only fields
-  const isVideoField = file.fieldname === 'livenessVideo';
-  const isVideoMime  = ALLOWED_VIDEO_MIMES.includes(file.mimetype);
+  const VIDEO_FIELDS  = ['livenessVideo', 'presentationReel'];
+  const isVideoField  = VIDEO_FIELDS.includes(file.fieldname);
+  const isVideoMime   = ALLOWED_VIDEO_MIMES.includes(file.mimetype);
   if (isVideoMime && !isVideoField) {
     return cb(new Error(`Video not allowed for field: ${file.fieldname}`), false);
   }
@@ -130,6 +139,16 @@ export const uploadGallery = multer({
   limits: {
     fileSize: 5 * 1024 * 1024,
     files: 10,
+  },
+  fileFilter,
+});
+
+// Presentation reel — 80 MB single video
+export const uploadReel = multer({
+  storage,
+  limits: {
+    fileSize: 80 * 1024 * 1024,
+    files: 1,
   },
   fileFilter,
 });

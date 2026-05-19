@@ -41,6 +41,7 @@ import calendarRoutes from './routes/calendarRoutes.js';
 import { publicBookingRouter, ownerBookingRouter } from './routes/bookingRoutes.js';
 import { ownerConsultationRouter, customerConsultationRouter } from './routes/consultationRoutes.js';
 import merchantInsightsRoutes from './routes/merchantInsightsRoutes.js';
+import aiAssistantRoutes from './routes/aiAssistantRoutes.js';
 import workModeRoutes from './routes/workModeRoutes.js';
 import financeRoutes from './routes/financeRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
@@ -232,6 +233,7 @@ app.use('/api/merchant/website', websiteRoutes);
 app.use('/api/merchant/bookings', ownerBookingRouter); // Owner dashboard management (auth required)
 app.use('/api/merchant/consultations', ownerConsultationRouter);
 app.use('/api/merchant/insights', merchantInsightsRoutes);
+app.use('/api/merchant/smart-assistant', aiAssistantRoutes);
 app.use('/api/merchant/finance', financeRoutes);
 app.use('/api/merchant/invoices', invoiceRoutes);
 app.use('/api/merchant/loyalty', loyaltyRoutes);
