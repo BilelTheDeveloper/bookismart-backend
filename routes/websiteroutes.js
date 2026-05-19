@@ -5,7 +5,7 @@ import {
   uploadWebsiteImage // 🆕 Added for Cloudinary
 } from '../controllers/websiteController.js';
 import { protect } from '../middleware/authMiddleware.js';
-import upload from '../config/cloudinary.js'; // 🆕 Your Multer-Cloudinary config
+import upload, { uploadGallery } from '../config/cloudinary.js';
 
 const router = express.Router();
 
@@ -24,10 +24,14 @@ router.get('/my-site', protect, getMyWebsite);
 // Security: [PROTECT] ensures the ID used to save is taken from the Secure Cookie.
 router.post('/save', protect, saveWebsite);
 
-// --- 3. IMAGE UPLOAD TO CLOUDINARY ---
-// Purpose: Securely upload an image and get a permanent URL back.
-// Security: [PROTECT] ensures only merchants can upload.
-// Logic: 'upload.single' uses the key 'image' from the frontend FormData.
-router.post('/upload', protect, upload.single('image'), uploadWebsiteImage);
+// --- 3. SINGLE IMAGE UPLOAD (hero, about, generic asset) ---
+// Field name from FormData can be: 'image' | 'heroImage' | 'aboutImage'
+router.post('/upload', protect, upload.single('image'),     uploadWebsiteImage);
+router.post('/upload/hero',  protect, upload.single('heroImage'),  uploadWebsiteImage);
+router.post('/upload/about', protect, upload.single('aboutImage'), uploadWebsiteImage);
+
+// --- 4. GALLERY BULK UPLOAD (up to 10 images) ---
+// FormData field: 'galleryImage' (array)
+router.post('/upload/gallery', protect, uploadGallery.array('galleryImage', 10), uploadWebsiteImage);
 
 export default router;

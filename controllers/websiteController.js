@@ -38,19 +38,25 @@ export const getMyWebsite = async (req, res) => {
  */
 export const uploadWebsiteImage = async (req, res) => {
   try {
-    // req.file is populated by your upload.single() or upload.array() middleware
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded or invalid file type." });
+    // Single file upload (hero, about, generic)
+    if (req.file) {
+      return res.status(200).json({
+        success: true,
+        url:       req.file.path,
+        public_id: req.file.filename,
+      });
     }
 
-    // Return the secure Cloudinary URL to the frontend
-    res.status(200).json({
-      url: req.file.path, // This is the permanent https:// link from Cloudinary
-      public_id: req.file.filename
-    });
+    // Bulk gallery upload — req.files is an array
+    if (req.files && req.files.length > 0) {
+      const uploaded = req.files.map((f) => ({ url: f.path, public_id: f.filename }));
+      return res.status(200).json({ success: true, files: uploaded });
+    }
+
+    return res.status(400).json({ success: false, message: 'No file uploaded or invalid file type.' });
   } catch (error) {
     console.error(`🚨 [IMAGE_UPLOAD_ERROR]: ${error.message}`);
-    res.status(500).json({ message: "Image processing failed." });
+    res.status(500).json({ success: false, message: 'Image processing failed.' });
   }
 };
 
