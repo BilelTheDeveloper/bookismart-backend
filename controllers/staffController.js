@@ -17,8 +17,9 @@ const setStaffCsrfCookie = (res, token) => {
 /* ─── Helpers ─── */
 const generateOTP  = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+const VALID_DATA_URL = /^data:image\/.+;base64,/;
 const uploadBase64 = async (dataUrl, folder) => {
-  if (!dataUrl?.startsWith('data:')) return null;
+  if (!dataUrl || !VALID_DATA_URL.test(dataUrl)) return null;
   const result = await cloudinary.uploader.upload(dataUrl, {
     folder,
     resource_type: 'image',
@@ -538,7 +539,11 @@ export const submitStaffKYC = async (req, res) => {
     if (!staff || staff.status !== 'pending_kyc') return res.status(404).json({ success: false, message: 'Invalid link or wrong stage.' });
 
     const { livenessPhotoBase64, idFrontBase64, idBackBase64 } = req.body;
-    if (!livenessPhotoBase64 || !idFrontBase64 || !idBackBase64) {
+    if (
+      !VALID_DATA_URL.test(livenessPhotoBase64) ||
+      !VALID_DATA_URL.test(idFrontBase64) ||
+      !VALID_DATA_URL.test(idBackBase64)
+    ) {
       return res.status(400).json({ success: false, message: 'Selfie, ID front, and ID back are all required.' });
     }
 

@@ -285,6 +285,94 @@ export const getCustomerActiveSession = async (req, res) => {
   }
 };
 
+/* ── Add a booking to the waiting queue (status = 'waiting') ── */
+export const addBookingToQueue = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const { bookingId } = req.params;
+
+    const booking = await Booking.findOne({ _id: bookingId, ownerId });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found.' });
+    }
+
+    const existing = await Consultation.findOne({ bookingId: booking._id });
+    if (existing && ACTIVE_STATUSES.includes(existing.status)) {
+      return res.status(409).json({ success: false, message: 'Booking is already in the queue.' });
+    }
+
+    const durationMinutes = Math.max(5, toSafeNumber(booking?.service?.duration, 30));
+    const initialSeconds  = durationMinutes * 60;
+
+    const consultation = await Consultation.findOneAndUpdate(
+      { bookingId: booking._id },
+      {
+        ownerId,
+        bookingId: booking._id,
+        customerName:           booking.customerName,
+        customerEmail:          booking.customerEmail,
+        customerPhone:          booking.customerPhone,
+        serviceTitle:           booking?.service?.title || 'Service',
+        servicePrice:           booking?.service?.price || '',
+        serviceDurationMinutes: durationMinutes,
+        dateString:             booking.dateString,
+        timeSlot:               booking.timeSlot,
+        status:                 'waiting',
+        initialSeconds,
+        remainingSeconds:       initialSeconds,
+        startedAt:              new Date(),
+        endedAt:                null,
+        lastActivityAt:         new Date(),
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    if (booking.status === 'pending') {
+      booking.status = 'confirmed';
+      await booking.save();
+    }
+
+    return res.status(200).json({ success: true, data: consultation });
+  } catch (error) {
+    console.error(`[QUEUE_ADD_ERROR] ${error.message}`);
+    return res.status(500).json({ success: false, message: 'Failed to add to queue.' });
+  }
+};
+
+/* ── Call a waiting consultation → in_progress ── */
+export const callConsultation = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const { consultationId } = req.params;
+
+    const alreadyActive = await Consultation.findOne({ ownerId, status: 'in_progress' });
+    if (alreadyActive && String(alreadyActive._id) !== consultationId) {
+      return res.status(409).json({
+        success: false,
+        message: 'Another session is already in progress. Complete it first.',
+      });
+    }
+
+    const consultation = await Consultation.findOne({ _id: consultationId, ownerId });
+    if (!consultation) {
+      return res.status(404).json({ success: false, message: 'Consultation not found.' });
+    }
+    if (consultation.status !== 'waiting') {
+      return res.status(400).json({ success: false, message: 'Consultation is not in waiting status.' });
+    }
+
+    consultation.status          = 'in_progress';
+    consultation.startedAt       = new Date();
+    consultation.lastActivityAt  = new Date();
+    await consultation.save();
+
+    return res.status(200).json({ success: true, data: consultation });
+  } catch (error) {
+    console.error(`[QUEUE_CALL_ERROR] ${error.message}`);
+    return res.status(500).json({ success: false, message: 'Failed to call consultation.' });
+  }
+};
+
 export const getCustomerConsultationHistory = async (req, res) => {
   try {
     const ownerId = req.user._id;

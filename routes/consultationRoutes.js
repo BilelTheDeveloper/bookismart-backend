@@ -10,6 +10,8 @@ import {
   completeConsultation,
   getCustomerConsultationHistory,
   getCustomerActiveSession,
+  addBookingToQueue,
+  callConsultation,
 } from '../controllers/consultationController.js';
 
 /* ── Owner router ── */
@@ -20,6 +22,8 @@ ownerConsultationRouter.get('/',                               getOwnerConsultat
 ownerConsultationRouter.get('/queue',                          getConsultationQueue);
 ownerConsultationRouter.get('/customer-history',               getCustomerConsultationHistory);
 ownerConsultationRouter.post('/from-booking/:bookingId',       startConsultationFromBooking);
+ownerConsultationRouter.post('/queue/:bookingId',              addBookingToQueue);
+ownerConsultationRouter.patch('/:consultationId/call',         callConsultation);
 ownerConsultationRouter.patch('/:consultationId/timer',        updateConsultationTimer);
 ownerConsultationRouter.patch('/:consultationId/complete',     completeConsultation);
 ownerConsultationRouter.post('/:consultationId/messages',      addConsultationMessage);

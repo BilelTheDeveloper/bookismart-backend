@@ -15,8 +15,9 @@ import { getCsrfCookieOptions } from '../utils/tokenService.js';
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+const VALID_DATA_URL = /^data:image\/.+;base64,/;
 const uploadBase64 = async (dataUrl, folder) => {
-  if (!dataUrl || !dataUrl.startsWith('data:')) return null;
+  if (!dataUrl || !VALID_DATA_URL.test(dataUrl)) return null;
   const result = await cloudinary.uploader.upload(dataUrl, {
     folder,
     resource_type: 'image',
@@ -360,7 +361,11 @@ export const submitKYC = async (req, res) => {
     const { token } = req.params;
     const { livenessPhotoBase64, idFrontBase64, idBackBase64 } = req.body;
 
-    if (!livenessPhotoBase64 || !idFrontBase64 || !idBackBase64) {
+    if (
+      !VALID_DATA_URL.test(livenessPhotoBase64) ||
+      !VALID_DATA_URL.test(idFrontBase64) ||
+      !VALID_DATA_URL.test(idBackBase64)
+    ) {
       return res.status(400).json({ success: false, message: 'Liveness photo, ID front and ID back are all required.' });
     }
 
