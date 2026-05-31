@@ -392,11 +392,33 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing required booking fields.' });
     }
 
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, message: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+    if (!/^\d{2}:\d{2}$/.test(timeSlot)) {
+      return res.status(400).json({ success: false, message: 'Invalid time format. Use HH:MM.' });
+    }
+    if (typeof customerName !== 'string' || customerName.length > 120) {
+      return res.status(400).json({ success: false, message: 'Customer name too long.' });
+    }
+    if (typeof customerEmail !== 'string' || customerEmail.length > 200) {
+      return res.status(400).json({ success: false, message: 'Invalid email.' });
+    }
+    if (typeof customerPhone !== 'string' || customerPhone.length > 30) {
+      return res.status(400).json({ success: false, message: 'Invalid phone number.' });
+    }
+    if (notes && (typeof notes !== 'string' || notes.length > 1000)) {
+      return res.status(400).json({ success: false, message: 'Notes too long (max 1000 chars).' });
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const bookingDate = new Date(date);
     bookingDate.setHours(0, 0, 0, 0);
 
+    if (isNaN(bookingDate.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid date value.' });
+    }
     if (bookingDate < today) {
       return res.status(400).json({ success: false, message: 'Cannot book in the past.' });
     }
@@ -561,34 +583,29 @@ export const getMyBookings = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    const [bookings, total] = await Promise.all([
+    const [bookings, total, statusAgg] = await Promise.all([
       Booking.find(filter)
         .sort({ appointmentDate: 1 })
         .skip(skip)
         .limit(limit),
       Booking.countDocuments(filter),
+      Booking.aggregate([
+        { $match: { ownerId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
     ]);
 
-    const [pendingCount, confirmedCount, completedCount, cancelledCount, noShowCount] =
-      await Promise.all([
-        Booking.countDocuments({ ownerId, status: 'pending' }),
-        Booking.countDocuments({ ownerId, status: 'confirmed' }),
-        Booking.countDocuments({ ownerId, status: 'completed' }),
-        Booking.countDocuments({ ownerId, status: 'cancelled' }),
-        Booking.countDocuments({ ownerId, status: 'no-show' }),
-      ]);
+    const summaryMap = { pending: 0, confirmed: 0, completed: 0, cancelled: 0, noShow: 0 };
+    const statusKey = { pending: 'pending', confirmed: 'confirmed', completed: 'completed', cancelled: 'cancelled', 'no-show': 'noShow' };
+    for (const { _id, count } of statusAgg) {
+      if (statusKey[_id]) summaryMap[statusKey[_id]] = count;
+    }
+    summaryMap.total = Object.values(summaryMap).reduce((a, b) => a + b, 0);
 
     res.status(200).json({
       success: true,
       data: bookings,
-      summary: {
-        pending: pendingCount,
-        confirmed: confirmedCount,
-        completed: completedCount,
-        cancelled: cancelledCount,
-        noShow: noShowCount,
-        total: pendingCount + confirmedCount + completedCount + cancelledCount + noShowCount,
-      },
+      summary: summaryMap,
       pagination: {
         total,
         page,

@@ -13,17 +13,11 @@ import { logSecurityEvent } from '../utils/securityEventLogger.js';
  */
 const ALLOWED_ACCOUNT_STATUSES = ['active', 'on_boarding', 'review', 'pending_kyc', 'rejected'];
 
-/**
- * In-memory fingerprint mismatch tracker.
- * Structure: Map<userId, { count: number, firstSeen: number }>
- */
-const fingerprintBreachTracker = new Map();
-
 /** How many fingerprint mismatches before a temporary lockout. */
 const MAX_FINGERPRINT_VIOLATIONS = 5;
 
-/** Lockout window in milliseconds (15 minutes). */
-const BREACH_WINDOW_MS = 15 * 60 * 1000;
+/** Lockout window in seconds (15 minutes). */
+const BREACH_WINDOW_S = 15 * 60;
 
 /* ─────────────────────────────────────────────────────────────────────────────
    HELPERS
@@ -72,20 +66,18 @@ const maskFingerprint = (value) => {
 };
 
 /**
- * Tracks repeated fingerprint violations for a given user ID.
+ * Tracks fingerprint violations per user in Redis so the counter survives restarts
+ * and works correctly across multiple server instances.
  */
-const isBreachLimitExceeded = (userId) => {
-  const now    = Date.now();
-  const record = fingerprintBreachTracker.get(userId) ?? { count: 0, firstSeen: now };
-
-  if (now - record.firstSeen > BREACH_WINDOW_MS) {
-    fingerprintBreachTracker.set(userId, { count: 1, firstSeen: now });
-    return false;
+const isBreachLimitExceeded = async (userId) => {
+  try {
+    const key   = `fp:breach:${userId}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, BREACH_WINDOW_S);
+    return count >= MAX_FINGERPRINT_VIOLATIONS;
+  } catch {
+    return false; // fail open when Redis is unavailable — prefer availability over lockout
   }
-
-  record.count += 1;
-  fingerprintBreachTracker.set(userId, record);
-  return record.count >= MAX_FINGERPRINT_VIOLATIONS;
 };
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -194,8 +186,8 @@ export const protect = async (req, res, next) => {
       });
       // Continue as authenticated: same device header is still proven.
     } else {
-    /* ── 6. Breach rate limiting ── */
-    const limitHit = isBreachLimitExceeded(decoded.id);
+    /* ── 6. Breach rate limiting (Redis-backed, survives restarts) ── */
+    const limitHit = await isBreachLimitExceeded(decoded.id);
 
     secLog.breach(req, 'Fingerprint mismatch detected', {
       requestId,

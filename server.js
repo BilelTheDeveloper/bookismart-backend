@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import mongoSanitize from 'express-mongo-sanitize';
+import compression from 'compression';
 
 // ── Startup env validation (fail fast before anything connects) ──
 const REQUIRED_ENV = [
@@ -113,21 +114,33 @@ const corsOptions = {
 // rate-limit, or any other middleware can reject them.
 app.options(/(.*)/, cors(corsOptions));
 
+app.use(compression({ level: 6, threshold: 1024 }));
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
   contentSecurityPolicy: {
     directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc:  ["'self'"],
-      styleSrc:   ["'self'", "'unsafe-inline'"],
-      imgSrc:     ["'self'", "data:", "https://res.cloudinary.com"],
-      connectSrc: ["'self'"],
-      frameSrc:   ["'none'"],
-      objectSrc:  ["'none'"],
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'"],
+      styleSrc:    ["'self'", "'unsafe-inline'"],
+      imgSrc:      ["'self'", "data:", "https://res.cloudinary.com"],
+      connectSrc:  ["'self'"],
+      frameSrc:    ["'none'"],
+      objectSrc:   ["'none'"],
+      upgradeInsecureRequests: [],
     },
   },
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permissionsPolicy: {
+    features: {
+      geolocation: [],
+      microphone:  [],
+      camera:      [],
+      payment:     [],
+      usb:         [],
+    },
+  },
 }));
 
 // Defense-in-depth: strip MongoDB operators from body/params.
@@ -161,9 +174,16 @@ app.use((req, res, next) => {
 // Stripe webhook — raw body BEFORE express.json()
 app.use('/api/payments', paymentRoutes);
 
-// 🛡️ DATA PARSING
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// No-cache for every API response — prevents sensitive data leaking via CDN/proxy caches
+app.use('/api/', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+});
+
+// 🛡️ DATA PARSING — 200kb max for JSON; file uploads go through multer (multipart)
+app.use(express.json({ limit: '200kb' }));
+app.use(express.urlencoded({ extended: true, limit: '200kb' }));
 
 /**
  * 🛡️ CUSTOM ENTERPRISE SANITIZER
@@ -397,7 +417,7 @@ io.on('connection', (socket) => {
     try {
       if (!socket.data.workMode?.ownerId) return;
       if (!consultationId || typeof consultationId !== 'string') return;
-      if (!text || typeof text !== 'string' || !text.trim()) return;
+      if (!text || typeof text !== 'string' || !text.trim() || text.length > 5000) return;
 
       const { default: Consultation } = await import('./models/Consultation.js');
       const c = await Consultation.findOne({ _id: consultationId, ownerId: socket.data.workMode.ownerId });

@@ -16,10 +16,10 @@ export const calculateServerAnchor = (req) => {
      * Wi-Fi to 5G or when Render's proxy shifts.
      */
 
-    // 2. Security Salt
-    // Using your secret key as a salt makes the fingerprint unique to your app.
-    const salt = process.env.JWT_ACCESS_SECRET;
-    if (!salt) throw new Error('JWT_ACCESS_SECRET is not set');
+    // Dedicated secret keeps fingerprint derivation independent from JWT signing.
+    // Set FINGERPRINT_SECRET in your env — falls back to JWT_ACCESS_SECRET if absent.
+    const salt = process.env.FINGERPRINT_SECRET || process.env.JWT_ACCESS_SECRET;
+    if (!salt) throw new Error('Neither FINGERPRINT_SECRET nor JWT_ACCESS_SECRET is set');
 
     // 3. Consistent Hashing
     // Hashing UserAgent + Salt for a "Double-Lock" hardware anchor.

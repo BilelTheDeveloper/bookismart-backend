@@ -45,11 +45,12 @@ export const fingerprinter = (req, res, next) => {
       configurable: true
     });
 
-    // Logging for Render monitoring
-    if (boundIdentity) {
-      console.log(`[Security Hub] Identity Locked: ${boundIdentity.substring(0, 10)}...`);
-    } else {
-      console.warn(`[Security Hub] Identity Incomplete: Missing Client Header`);
+    if (process.env.NODE_ENV !== 'production') {
+      if (boundIdentity) {
+        console.log(`[Security Hub] Identity Locked: ${boundIdentity.substring(0, 10)}...`);
+      } else {
+        console.warn(`[Security Hub] Identity Incomplete: Missing Client Header`);
+      }
     }
 
     next();

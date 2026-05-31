@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import {
   getBookingInfo,
@@ -11,6 +12,13 @@ import {
   sendReviewRequest,
 } from '../controllers/bookingController.js';
 import { protect } from '../middleware/authMiddleware.js';
+
+const validateMerchantId = (req, res, next) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.merchantId)) {
+    return res.status(400).json({ success: false, message: 'Invalid merchant identifier.' });
+  }
+  next();
+};
 
 /* ─────────────────────────────────────────────────────────────────────────────
    PUBLIC BOOKING ROUTER
@@ -29,13 +37,13 @@ const createBookingLimiter = rateLimit({
 });
 
 // GET  /api/public/booking/:merchantId          → Services + hours info
-publicBookingRouter.get('/:merchantId', getBookingInfo);
+publicBookingRouter.get('/:merchantId', validateMerchantId, getBookingInfo);
 
 // GET  /api/public/booking/:merchantId/slots    → Available time slots
-publicBookingRouter.get('/:merchantId/slots', getAvailableSlots);
+publicBookingRouter.get('/:merchantId/slots', validateMerchantId, getAvailableSlots);
 
 // POST /api/public/booking/:merchantId          → Create a booking
-publicBookingRouter.post('/:merchantId', createBookingLimiter, createBooking);
+publicBookingRouter.post('/:merchantId', validateMerchantId, createBookingLimiter, createBooking);
 
 export { publicBookingRouter };
 

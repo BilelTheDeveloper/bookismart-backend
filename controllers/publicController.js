@@ -95,8 +95,9 @@ export const getDiscoveryFeed = async (req, res) => {
       category,
       sort = 'rating',
       search,
-      limit = 60,
     } = req.query;
+
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 60));
 
     const websiteFilter = { verificationStatus: 'approved', isPublished: true };
     const ownerMatch = {};
@@ -111,7 +112,7 @@ export const getDiscoveryFeed = async (req, res) => {
       })
       .select('slug category hero services contact setupConfig gallery businessHours ownerId lastUpdated')
       .sort({ lastUpdated: -1 })
-      .limit(Number(limit))
+      .limit(limit)
       .lean();
 
     websites = websites.filter((w) => w.ownerId);
