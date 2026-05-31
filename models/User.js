@@ -23,10 +23,26 @@ const UserSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
-  role: { 
-    type: String, 
-    enum: ['owner', 'admin'], 
-    default: 'owner' 
+  role: {
+    type: String,
+    enum: ['owner', 'admin'],
+    default: 'owner'
+  },
+
+  // --- 1b. ACCOUNT TYPE (Individual professional vs Organization) ---
+  // 'individual'  → solo professional (barber, doctor, coach…), single location.
+  // 'organization' → clinic / salon chain / franchise with multiple branches & a team.
+  // NOTE: the full Organization/Branch/Member system is deferred; this flag drives the
+  // signup experience, billing tier (org tiers are priced by seats + branches) and gating.
+  accountType: {
+    type: String,
+    enum: ['individual', 'organization'],
+    default: 'individual',
+  },
+  organization: {
+    name: { type: String, trim: true },
+    branchCount: { type: Number, default: 1, min: 1 },  // intended number of locations
+    teamSize: { type: Number, default: 1, min: 1 },     // intended number of staff seats
   },
 
   // --- 2. BUSINESS BRANDING & LOCATION (Step 1 Update) ---

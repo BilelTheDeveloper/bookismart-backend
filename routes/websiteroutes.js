@@ -8,6 +8,7 @@ import {
 } from '../controllers/websiteController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import upload, { uploadGallery, uploadReel } from '../config/cloudinary.js';
+import { privateCache, TTL } from '../middleware/cache.js';
 
 const router = express.Router();
 
@@ -19,7 +20,11 @@ const router = express.Router();
 // --- 1. GET MERCHANT CONFIGURATION ---
 // Purpose: Fetch the current website data to populate the frontend form.
 // Security: [PROTECT] ensures only the logged-in owner sees their own data.
-router.get('/my-site', protect, getMyWebsite);
+router.get('/my-site',
+  protect,
+  privateCache(() => ['my-site'], TTL.MY_WEBSITE),
+  getMyWebsite,
+);
 
 // --- 2. SAVE/UPDATE CONFIGURATION ---
 // Purpose: Save the website builder progress or publish changes.

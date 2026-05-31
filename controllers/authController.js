@@ -186,7 +186,10 @@ export const register = async (req, res) => {
     const { error } = validateSignup(req.body);
     if (error) return res.status(400).json({ success: false, errors: error.details.map(d => d.message) });
 
-    const { email, phone, password, fullName, businessName, category, ville } = req.body;
+    const { email, phone, password, fullName, businessName, category, ville,
+            accountType, organizationName, branchCount, teamSize } = req.body;
+
+    const resolvedAccountType = accountType === 'organization' ? 'organization' : 'individual';
 
     const deviceId = req.headers['x-device-fingerprint'];
     if (!deviceId) {
@@ -206,6 +209,12 @@ export const register = async (req, res) => {
       businessName,
       category,
       ville,
+      accountType: resolvedAccountType,
+      organization: resolvedAccountType === 'organization' ? {
+        name: organizationName || businessName,
+        branchCount: Number(branchCount) > 0 ? Number(branchCount) : 1,
+        teamSize: Number(teamSize) > 0 ? Number(teamSize) : 1,
+      } : undefined,
       accountStatus: 'pending_kyc',
       kyc: { status: 'none' },
       profilePicUrl: req.files?.profilePic?.[0]?.path || null,
@@ -241,6 +250,8 @@ export const register = async (req, res) => {
         accountStatus: newUser.accountStatus,
         businessName: newUser.businessName,
         category: newUser.category,
+        accountType: newUser.accountType,
+        organization: newUser.organization,
         profilePicUrl: newUser.profilePicUrl,
       },
     });
@@ -400,6 +411,8 @@ export const login = async (req, res) => {
         accountStatus: user.accountStatus,
         businessName: user.businessName,
         category: user.category,
+        accountType: user.accountType,
+        organization: user.organization,
       }
     });
   } catch (err) {
@@ -546,6 +559,8 @@ export const verifyMe = async (req, res) => {
         accountStatus: user.accountStatus,
         businessName: user.businessName,
         category: user.category,
+        accountType: user.accountType,
+        organization: user.organization,
         kycStatus: user.kyc?.status,
         trialEndsAt: user.paymentInfo?.subscription?.trialEndsAt ?? null,
       }

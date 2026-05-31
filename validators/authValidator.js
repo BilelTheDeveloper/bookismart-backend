@@ -27,6 +27,12 @@ export const validateSignup = (data) => {
     businessName: Joi.string().min(2).required().trim(),
     category: Joi.string().valid(...businessCategories).required(),
     ville: Joi.string().valid(...tunisianCities).required(),
+
+    // --- ACCOUNT TYPE (Individual vs Organization) ---
+    accountType: Joi.string().valid('individual', 'organization').optional(),
+    organizationName: Joi.string().allow('').max(80).optional().trim(),
+    branchCount: Joi.number().integer().min(1).max(500).optional(),
+    teamSize: Joi.number().integer().min(1).max(10000).optional(),
     
     // Password Rule: Min 8 chars, 1 Upper, 1 Lower, 1 Number
     password: Joi.string()

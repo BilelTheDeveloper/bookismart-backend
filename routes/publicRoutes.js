@@ -11,6 +11,7 @@ import {
   getDisplayQueue,
 } from '../controllers/publicController.js';
 import { validateDiscountCode } from '../controllers/loyaltyController.js';
+import { publicCache, hashQuery, TTL } from '../middleware/cache.js';
 
 const router = express.Router();
 
@@ -35,17 +36,41 @@ const validateObjectId = (paramName) => (req, res, next) => {
 };
 
 // No protection middleware — fully public
-router.get('/discovery',              getDiscoveryFeed);
-router.get('/discovery/stats',        getDiscoveryStats);
-router.get('/site/:slug',             getWebsiteBySlug);
+router.get('/discovery',
+  publicCache(req => ['disc', hashQuery(req.query)], TTL.DISCOVERY),
+  getDiscoveryFeed,
+);
+
+router.get('/discovery/stats',
+  publicCache(() => ['disc-stats'], TTL.DISCOVERY_STATS),
+  getDiscoveryStats,
+);
+
+router.get('/site/:slug',
+  publicCache(req => ['site', req.params.slug], TTL.SITE),
+  getWebsiteBySlug,
+);
+
 router.post('/loyalty/validate-code', validateDiscountCode);
 
 // Review system
-router.get('/reviews/lookup',                                  reviewLookupLimiter, reviewLookup);
-router.get('/reviews/:ownerId',       validateObjectId('ownerId'), getPublicReviews);
-router.post('/reviews/submit',        reviewSubmitLimiter,        submitPublicReview);
+router.get('/reviews/lookup',
+  reviewLookupLimiter,
+  reviewLookup,
+);
+
+router.get('/reviews/:ownerId',
+  validateObjectId('ownerId'),
+  publicCache(req => ['rev', req.params.ownerId, req.query.page || '1', req.query.limit || '10'], TTL.REVIEWS),
+  getPublicReviews,
+);
+
+router.post('/reviews/submit', reviewSubmitLimiter, submitPublicReview);
 
 // Waiting room display (public, no auth — returns only first names)
-router.get('/display/:slug',          getDisplayQueue);
+router.get('/display/:slug',
+  publicCache(req => ['disp', req.params.slug], TTL.DISPLAY),
+  getDisplayQueue,
+);
 
 export default router;

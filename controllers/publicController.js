@@ -4,6 +4,7 @@ import Review from '../models/Review.js';
 import Booking from '../models/Booking.js';
 import Consultation from '../models/Consultation.js';
 import crypto from 'crypto';
+import { bustPublic, bustPublicPrefix } from '../middleware/cache.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED HELPER — aggregate trust metrics for a set of ownerIds in one query
@@ -346,6 +347,14 @@ export const submitPublicReview = async (req, res) => {
     booking.reviewSubmittedAt = new Date();
     booking.reviewToken = '';
     await booking.save();
+
+    // Invalidate review pages and the site's trust metrics (fire-and-forget)
+    const ownerId = booking.ownerId.toString();
+    bustPublicPrefix(`rev:${ownerId}:`).catch(() => {});
+    // Look up the slug so we can bust the public site cache too
+    Website.findOne({ ownerId: booking.ownerId }).select('slug').lean()
+      .then(site => { if (site?.slug) bustPublic('site', site.slug).catch(() => {}); })
+      .catch(() => {});
 
     res.status(201).json({ success: true, message: 'Thank you! Your review has been published.' });
   } catch (err) {

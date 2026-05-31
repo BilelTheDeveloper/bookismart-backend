@@ -2,6 +2,7 @@ import Website from '../models/Website.js';
 import User from '../models/User.js';
 import { validateWebsitePayload } from '../validators/websiteValidator.js';
 import { cloudinary } from '../config/cloudinary.js';
+import { bustPublic, bustPrivate } from '../middleware/cache.js';
 
 /**
  * 🛡️ ADVANCED WEBSITE CONTROLLER (2026 Security Standards)
@@ -134,6 +135,14 @@ export const saveWebsite = async (req, res) => {
       { new: true, upsert: true, runValidators: true }
     );
 
+    // Invalidate public site page, booking-info page, and owner's own config
+    const uid = ownerId.toString();
+    Promise.all([
+      bustPublic('site', website.slug),  // public storefront (services/hours changed)
+      bustPublic('bk-info', uid),        // booking info page (services/hours used there too)
+      bustPrivate(uid, 'my-site'),       // owner's cached config in the builder
+    ]).catch(() => {});
+
     res.status(200).json({
       message: "Website secured and saved. Pending admin review.",
       slug: website.slug,
@@ -190,7 +199,7 @@ export const uploadPresentationReel = async (req, res) => {
     }
 
     // Delete previous reel if it exists
-    const existing = await Website.findOne({ ownerId }).select('presentationReel');
+    const existing = await Website.findOne({ ownerId }).select('presentationReel slug');
     if (existing?.presentationReel?.publicId) {
       await cloudinary.uploader.destroy(existing.presentationReel.publicId, { resource_type: 'video' }).catch(() => {});
     }
@@ -206,6 +215,13 @@ export const uploadPresentationReel = async (req, res) => {
       },
       { upsert: true }
     );
+
+    // Invalidate public site and owner's cached config
+    const uid = ownerId.toString();
+    Promise.all([
+      existing?.slug ? bustPublic('site', existing.slug) : Promise.resolve(),
+      bustPrivate(uid, 'my-site'),
+    ]).catch(() => {});
 
     res.status(200).json({
       success: true,
@@ -227,7 +243,7 @@ export const uploadPresentationReel = async (req, res) => {
 export const deletePresentationReel = async (req, res) => {
   try {
     const ownerId = req.user._id;
-    const site = await Website.findOne({ ownerId }).select('presentationReel');
+    const site = await Website.findOne({ ownerId }).select('presentationReel slug');
 
     if (site?.presentationReel?.publicId) {
       await cloudinary.uploader.destroy(site.presentationReel.publicId, { resource_type: 'video' }).catch(() => {});
@@ -241,6 +257,13 @@ export const deletePresentationReel = async (req, res) => {
         'presentationReel.publicId': '',
       }
     );
+
+    // Invalidate public site and owner's cached config
+    const uid = ownerId.toString();
+    Promise.all([
+      site?.slug ? bustPublic('site', site.slug) : Promise.resolve(),
+      bustPrivate(uid, 'my-site'),
+    ]).catch(() => {});
 
     res.status(200).json({ success: true, message: 'Reel removed.' });
   } catch (err) {

@@ -6,6 +6,7 @@ import CustomerLoyalty from '../models/CustomerLoyalty.js';
 import Invoice from '../models/Invoice.js';
 import { sendEmail } from '../utils/emailService.js';
 import { sendWhatsAppConfirmation, sendWhatsAppCancellation } from '../utils/messageProviders.js';
+import { bustPublic, bustPrivate, bustPrivatePrefix } from '../middleware/cache.js';
 
 const escHtml = (s) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -529,6 +530,9 @@ export const createBooking = async (req, res) => {
       console.error('[BOOKING_EMAIL_NOTIFY_ERROR]', err.message)
     );
 
+    // Invalidate slots cache for this exact date — the slot is now taken
+    bustPublic('slots', merchantId, date).catch(() => {});
+
     res.status(201).json({
       success: true,
       message: 'Booking confirmed! The business will reach out to confirm your appointment.',
@@ -685,6 +689,16 @@ export const updateBookingStatus = async (req, res) => {
         console.error('[COMPLETION_HOOK_ERROR]', e.message)
       );
     }
+
+    // Invalidate all caches affected by a status change (fire-and-forget)
+    const uid = ownerId.toString();
+    Promise.all([
+      bustPublic('slots', uid, booking.dateString),   // slot may have opened (cancel) or closed
+      bustPrivatePrefix(uid, 'bookings:'),             // paginated booking lists
+      bustPrivate(uid, 'analytics'),                   // status breakdown changed
+      bustPrivate(uid, 'kpi'),                         // KPI summary changed
+      bustPrivate(uid, 'customers'),                   // customer visit/spend totals may change
+    ]).catch(() => {});
 
     // WhatsApp — confirmation and cancellation notifications
     if (status === 'confirmed' && existing.status !== 'confirmed') {
@@ -848,6 +862,14 @@ export const rescheduleBooking = async (req, res) => {
       },
       { new: true }
     );
+
+    // Invalidate slots for both the old date (slot freed) and new date (slot taken)
+    const uid = ownerId.toString();
+    Promise.all([
+      bustPublic('slots', uid, booking.dateString), // old date — slot freed
+      bustPublic('slots', uid, date),               // new date — slot taken
+      bustPrivatePrefix(uid, 'bookings:'),           // list changed
+    ]).catch(() => {});
 
     res.status(200).json({
       success: true,

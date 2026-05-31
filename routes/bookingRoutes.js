@@ -12,6 +12,7 @@ import {
   sendReviewRequest,
 } from '../controllers/bookingController.js';
 import { protect } from '../middleware/authMiddleware.js';
+import { publicCache, privateCache, hashQuery, TTL } from '../middleware/cache.js';
 
 const validateMerchantId = (req, res, next) => {
   if (!mongoose.Types.ObjectId.isValid(req.params.merchantId)) {
@@ -37,10 +38,18 @@ const createBookingLimiter = rateLimit({
 });
 
 // GET  /api/public/booking/:merchantId          → Services + hours info
-publicBookingRouter.get('/:merchantId', validateMerchantId, getBookingInfo);
+publicBookingRouter.get('/:merchantId',
+  validateMerchantId,
+  publicCache(req => ['bk-info', req.params.merchantId], TTL.BOOKING_INFO),
+  getBookingInfo,
+);
 
 // GET  /api/public/booking/:merchantId/slots    → Available time slots
-publicBookingRouter.get('/:merchantId/slots', validateMerchantId, getAvailableSlots);
+publicBookingRouter.get('/:merchantId/slots',
+  validateMerchantId,
+  publicCache(req => ['slots', req.params.merchantId, req.query.date || ''], TTL.SLOTS),
+  getAvailableSlots,
+);
 
 // POST /api/public/booking/:merchantId          → Create a booking
 publicBookingRouter.post('/:merchantId', validateMerchantId, createBookingLimiter, createBooking);
@@ -56,7 +65,11 @@ const ownerBookingRouter = express.Router();
 
 // GET    /api/merchant/bookings                          → Paginated list with filters
 // Query: ?status=pending&date=2026-04-15&search=sami&page=1&limit=15
-ownerBookingRouter.get('/', protect, getMyBookings);
+ownerBookingRouter.get('/',
+  protect,
+  privateCache(req => ['bookings', hashQuery(req.query)], TTL.BOOKING_LIST),
+  getMyBookings,
+);
 
 // GET    /api/merchant/bookings/:bookingId               → Single booking detail
 ownerBookingRouter.get('/:bookingId', protect, getBookingDetail);
