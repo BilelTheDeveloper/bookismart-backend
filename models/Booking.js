@@ -62,6 +62,7 @@ const BookingSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'completed', 'cancelled', 'no-show'],
     default: 'pending'
   },
+  depositPaid: { type: Boolean, default: false },
   notes: {
     type: String,
     maxLength: 500

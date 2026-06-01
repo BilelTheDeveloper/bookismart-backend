@@ -192,6 +192,14 @@ const UserSchema = new mongoose.Schema({
     cancellationEmail: { type: Boolean, default: true },
   },
 
+  // --- 11. BOOKING / DEPOSIT POLICY (no-show protection via prepaid deposit) ---
+  bookingPolicy: {
+    depositEnabled: { type: Boolean, default: false },
+    depositType:    { type: String, enum: ['fixed', 'percent'], default: 'fixed' },
+    depositValue:   { type: Number, default: 0, min: 0 },   // TND if fixed, % if percent
+    provider:       { type: String, enum: ['flouci', 'konnect'], default: 'flouci' },
+  },
+
 }, { 
   timestamps: true 
 });

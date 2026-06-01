@@ -4,6 +4,8 @@ import User from '../models/User.js';
 import LoyaltyProgram from '../models/LoyaltyProgram.js';
 import CustomerLoyalty from '../models/CustomerLoyalty.js';
 import Invoice from '../models/Invoice.js';
+import BlockedCustomer from '../models/BlockedCustomer.js';
+import { createDepositForBooking } from './paymentController.js';
 import { sendEmail } from '../utils/emailService.js';
 import { sendWhatsAppConfirmation, sendWhatsAppCancellation } from '../utils/messageProviders.js';
 import { bustPublic, bustPrivate, bustPrivatePrefix } from '../middleware/cache.js';
@@ -424,9 +426,25 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cannot book in the past.' });
     }
 
-    const owner = await User.findById(merchantId).select('_id accountStatus email notificationPrefs');
+    const owner = await User.findById(merchantId).select('_id accountStatus email notificationPrefs bookingPolicy');
     if (!owner || owner.accountStatus === 'suspended') {
       return res.status(404).json({ success: false, message: 'Merchant not found or suspended.' });
+    }
+
+    // No-show protection: refuse bookings from blocked customers (by email or phone).
+    const blocked = await BlockedCustomer.findOne({
+      ownerId: merchantId,
+      $or: [
+        { email: customerEmail.toLowerCase().trim() },
+        ...(customerPhone ? [{ phone: customerPhone.trim() }] : []),
+      ],
+    }).select('_id');
+    if (blocked) {
+      return res.status(403).json({
+        success: false,
+        code: 'BLOCKED',
+        message: 'Online booking is unavailable for this contact. Please reach out to the business directly.',
+      });
     }
 
     const conflict = await Booking.findOne({
@@ -533,9 +551,19 @@ export const createBooking = async (req, res) => {
     // Invalidate slots cache for this exact date — the slot is now taken
     bustPublic('slots', merchantId, date).catch(() => {});
 
+    // Deposit-at-booking (no-show protection): if enabled + a provider is configured,
+    // create a payment link the customer is redirected to.
+    let deposit = null;
+    if (owner.bookingPolicy?.depositEnabled) {
+      try { deposit = await createDepositForBooking({ owner, booking }); }
+      catch (err) { console.error('[DEPOSIT_CREATE_ERROR]', err.message); }
+    }
+
     res.status(201).json({
       success: true,
-      message: 'Booking confirmed! The business will reach out to confirm your appointment.',
+      message: deposit
+        ? 'Almost done — please complete your deposit to confirm your booking.'
+        : 'Booking confirmed! The business will reach out to confirm your appointment.',
       data: {
         bookingId: booking._id,
         customerName: booking.customerName,
@@ -543,6 +571,8 @@ export const createBooking = async (req, res) => {
         date: booking.dateString,
         time: booking.timeSlot,
         status: booking.status,
+        depositUrl: deposit?.payUrl || null,
+        depositAmount: deposit?.amount || null,
       },
     });
   } catch (error) {

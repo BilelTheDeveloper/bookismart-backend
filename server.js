@@ -72,6 +72,9 @@ import chatRoutes         from './routes/chatRoutes.js';
 import paymentRoutes      from './routes/paymentRoutes.js';
 import kycRoutes          from './routes/kycRoutes.js';
 import branchRoutes       from './routes/branchRoutes.js';
+import packageRoutes      from './routes/packageRoutes.js';
+import noShowRoutes       from './routes/noShowRoutes.js';
+import marketingRoutes    from './routes/marketingRoutes.js';
 
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -260,6 +263,9 @@ app.use('/api/merchant/invoices', invoiceRoutes);
 app.use('/api/merchant/loyalty', loyaltyRoutes);
 app.use('/api/merchant/settings', settingsRoutes);
 app.use('/api/merchant/branches', branchRoutes);
+app.use('/api/merchant/packages', packageRoutes);
+app.use('/api/merchant/no-show',  noShowRoutes);
+app.use('/api/merchant/marketing', marketingRoutes);
 app.use('/api/kyc', kycRoutes);
 app.use('/api/work-mode', workModeRoutes);
 
