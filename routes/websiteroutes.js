@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   saveWebsite,
+  saveBuilder,
   getMyWebsite,
   uploadWebsiteImage,
   uploadPresentationReel,
@@ -30,6 +31,9 @@ router.get('/my-site',
 // Purpose: Save the website builder progress or publish changes.
 // Security: [PROTECT] ensures the ID used to save is taken from the Secure Cookie.
 router.post('/save', protect, saveWebsite);
+
+// --- 2b. SAVE SECTION BUILDER (dynamic Shopify-style site) ---
+router.post('/builder', protect, saveBuilder);
 
 // --- 3. SINGLE IMAGE UPLOAD (hero, about, generic asset) ---
 // Field name from FormData can be: 'image' | 'heroImage' | 'aboutImage'

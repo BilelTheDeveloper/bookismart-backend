@@ -90,7 +90,7 @@ export const saveWebsite = async (req, res) => {
     const {
       templateId, category, name, slug,
       hero, about, services, gallery,
-      beforeAfterGallery,
+      beforeAfterGallery, team, teamSection,
       contact, businessHours, setupConfig
     } = value;
 
@@ -125,6 +125,8 @@ export const saveWebsite = async (req, res) => {
           services,
           gallery,
           beforeAfterGallery,
+          team,
+          teamSection,
           contact,
           businessHours,
           setupConfig,
@@ -160,6 +162,82 @@ export const saveWebsite = async (req, res) => {
     }
 
     res.status(500).json({ message: "Internal Security Error" });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SAVE SECTION BUILDER (Shopify-style dynamic site)
+// @route  POST /api/merchant/website/builder
+// @access Private
+// ─────────────────────────────────────────────────────────────────────────────
+const ALLOWED_SECTION_TYPES = ['hero', 'about', 'services', 'team', 'stats', 'gallery', 'cta', 'contact'];
+
+export const saveBuilder = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const { name, sections, builderTheme } = req.body;
+
+    if (!Array.isArray(sections)) {
+      return res.status(400).json({ success: false, message: 'Invalid sections payload.' });
+    }
+    if (sections.length > 40) {
+      return res.status(400).json({ success: false, message: 'Too many sections (max 40).' });
+    }
+    // Light sanitation: keep only known section shapes.
+    const cleanSections = sections
+      .filter((s) => s && typeof s === 'object' && ALLOWED_SECTION_TYPES.includes(s.type))
+      .slice(0, 40)
+      .map((s) => ({
+        id: String(s.id || '').slice(0, 60),
+        type: s.type,
+        visible: s.visible !== false,
+        settings: (s.settings && typeof s.settings === 'object') ? s.settings : {},
+      }));
+
+    const theme = {
+      accent: typeof builderTheme?.accent === 'string' ? builderTheme.accent.slice(0, 9) : '#6366f1',
+      mode: builderTheme?.mode === 'light' ? 'light' : 'dark',
+    };
+
+    const user = await User.findById(ownerId).select('businessName category');
+    const baseName = (name || user?.businessName || 'my-site').toString().slice(0, 120);
+    const slug = `${baseName.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'site'}-${ownerId.toString().slice(-4)}`;
+
+    const website = await Website.findOneAndUpdate(
+      { ownerId },
+      {
+        $set: {
+          name: baseName,
+          sections: cleanSections,
+          builderTheme: theme,
+          useBuilder: true,
+          verificationStatus: 'pending',
+          lastUpdated: Date.now(),
+        },
+        $setOnInsert: {
+          ownerId,
+          slug,
+          templateId: 'BUILDER',
+          category: user?.category || 'Organization',
+        },
+      },
+      { new: true, upsert: true, runValidators: true }
+    );
+
+    const uid = ownerId.toString();
+    Promise.all([
+      bustPublic('site', website.slug),
+      bustPublic('bk-info', uid),
+      bustPrivate(uid, 'my-site'),
+    ]).catch(() => {});
+
+    res.json({ success: true, slug: website.slug, sections: website.sections.length });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ success: false, message: 'That site URL is already taken.' });
+    }
+    console.error(`🚨 [SAVE_BUILDER_ERROR]: ${error.message}`);
+    res.status(500).json({ success: false, message: 'Could not save your site.' });
   }
 };
 

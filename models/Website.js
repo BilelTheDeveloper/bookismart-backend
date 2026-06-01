@@ -20,10 +20,21 @@ const WebsiteSchema = new mongoose.Schema({
     required: true 
   }, // e.g., "BARBER_THEME_01" or "SPA_THEME_LUXURY"
 
-  category: { 
-    type: String, 
-    required: true 
+  category: {
+    type: String,
+    required: true
   }, // e.g., "barbershops", "spas"
+
+  // --- 1b. SECTION BUILDER (Shopify-style dynamic site) ---
+  // When useBuilder is true, the public site renders `sections` (ordered JSON)
+  // with `builderTheme`, instead of a fixed template component.
+  name: { type: String, default: '' },
+  useBuilder: { type: Boolean, default: false },
+  builderTheme: {
+    accent: { type: String, default: '#6366f1' },
+    mode:   { type: String, enum: ['dark', 'light'], default: 'dark' },
+  },
+  sections: [{ type: mongoose.Schema.Types.Mixed }],
 
   // --- 2. HERO SECTION ---
   hero: {
@@ -48,6 +59,25 @@ const WebsiteSchema = new mongoose.Schema({
     duration: { type: Number, default: 30, min: 5, max: 480 }, // Minutes
     bufferTime: { type: Number, default: 0, min: 0, max: 120 }, // Cleanup/prep minutes after service
     active: { type: Boolean, default: true }
+  }],
+
+  // --- 4b. TEAM SECTION (organization templates) ---
+  // Showcases the organization's practitioners/staff on the public site.
+  teamSection: {
+    show:     { type: Boolean, default: true },
+    title:    { type: String, default: "Meet Our Team" },
+    subtitle: { type: String, default: "The experts behind our work" },
+  },
+  team: [{
+    name:        { type: String, required: true, trim: true },
+    role:        { type: String, default: "", trim: true },
+    photo:       { type: String, default: "" },
+    bio:         { type: String, default: "", maxlength: 300 },
+    specialties: [{ type: String, trim: true }],
+    socials: {
+      instagram: { type: String, default: "" },
+      linkedin:  { type: String, default: "" },
+    },
   }],
 
   // --- 5. PRESENTATION REEL ---

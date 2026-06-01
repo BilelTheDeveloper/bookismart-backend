@@ -21,6 +21,18 @@ const pauseWindowSchema = Joi.object({
   end: Joi.string().pattern(/^\d{2}:\d{2}$/).required(),
 });
 
+const teamMemberSchema = Joi.object({
+  name: Joi.string().trim().min(1).max(80).required(),
+  role: Joi.string().allow('').max(80),
+  photo: Joi.string().uri({ scheme: ['http', 'https'] }).allow(''),
+  bio: Joi.string().allow('').max(300),
+  specialties: Joi.array().items(Joi.string().trim().max(40)).max(8).default([]),
+  socials: Joi.object({
+    instagram: Joi.string().allow('').max(200),
+    linkedin: Joi.string().allow('').max(200),
+  }).default({ instagram: '', linkedin: '' }),
+});
+
 export const validateWebsitePayload = (data) => {
   const schema = Joi.object({
     templateId: Joi.string().trim().min(3).max(64).required(),
@@ -39,6 +51,12 @@ export const validateWebsitePayload = (data) => {
       image: Joi.string().uri({ scheme: ['http', 'https'] }).allow(''),
     }).required(),
     services: Joi.array().items(serviceSchema).max(50).required(),
+    teamSection: Joi.object({
+      show: Joi.boolean().default(true),
+      title: Joi.string().allow('').max(120),
+      subtitle: Joi.string().allow('').max(200),
+    }).default({ show: true, title: 'Meet Our Team', subtitle: '' }),
+    team: Joi.array().items(teamMemberSchema).max(40).default([]),
     gallery: Joi.object({
       show: Joi.boolean().default(true),
       images: Joi.array().items(Joi.string().uri({ scheme: ['http', 'https'] }).allow('')).max(30).required(),
