@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
 import ActivityLog from '../models/ActivityLog.js';
+import { resolveEntitlements, serializeEntitlements } from '../config/plans.js';
 
 export const getSettings = async (req, res) => {
   try {
@@ -94,8 +95,9 @@ export const updateNotifications = async (req, res) => {
 
 export const getBilling = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('paymentInfo');
-    return res.status(200).json({ success: true, data: user.paymentInfo });
+    const user = await User.findById(req.user._id).select('paymentInfo accountType organization');
+    const entitlements = serializeEntitlements(resolveEntitlements(user || {}));
+    return res.status(200).json({ success: true, data: user.paymentInfo, entitlements });
   } catch (err) {
     console.error('[BILLING_ERROR]', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load billing information.' });

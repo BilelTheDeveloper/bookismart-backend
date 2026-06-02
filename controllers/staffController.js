@@ -4,6 +4,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import Staff from '../models/Staff.js';
 import User from '../models/User.js';
 import Notification from '../models/Notification.js';
+import { resolveEntitlements } from '../config/plans.js';
 import { sendEmail } from '../utils/emailService.js';
 import { issueStaffTokens } from '../middleware/staffAuth.js';
 import { redis } from '../config/redis.js';
@@ -169,6 +170,23 @@ export const inviteStaff = async (req, res) => {
     } else if (existing) {
       return res.status(409).json({ success: false, message: 'A staff member with this email already exists.' });
     } else {
+      // Plan-based seat cap (catalog). Re-inviting an existing member above does
+      // not consume a new seat; only brand-new members are checked. Trial = unlimited.
+      const owner = await User.findById(req.user._id).select('accountType organization paymentInfo');
+      const limit = resolveEntitlements(owner || {}).limits.staff; // Infinity = unlimited
+      if (limit !== Infinity) {
+        const seatsUsed = await Staff.countDocuments({ ownerId: req.user._id });
+        if (seatsUsed >= limit) {
+          return res.status(402).json({
+            success: false,
+            code: 'STAFF_LIMIT',
+            message: limit === 0
+              ? 'Your plan does not include staff seats. Upgrade to a Team plan to add staff.'
+              : `Your plan covers ${limit} staff seat${limit === 1 ? '' : 's'}. Upgrade to add more.`,
+          });
+        }
+      }
+
       staff = await Staff.create({
         ownerId: req.user._id,
         fullName, email, phone: phone || '',

@@ -127,19 +127,26 @@ const UserSchema = new mongoose.Schema({
     currency: { type: String, default: 'TND' },
     
     subscription: {
-      plan: { 
-        type: String, 
-        enum: ['free_trial', 'basic', 'premium', 'pro'], 
-        default: 'free_trial' 
+      plan: {
+        type: String,
+        // Current plans (see server/config/plans.js) + legacy ids kept for back-compat.
+        enum: [
+          'free_trial',
+          'solo_starter', 'solo_pro',           // Individual
+          'team', 'business', 'enterprise',      // Organization
+          'basic', 'premium', 'pro',             // legacy (pre-relaunch)
+        ],
+        default: 'free_trial'
       },
-      status: { 
-        type: String, 
-        enum: ['active', 'past_due', 'canceled', 'trialing'], 
-        default: 'trialing' 
+      status: {
+        type: String,
+        enum: ['active', 'past_due', 'canceled', 'trialing'],
+        default: 'trialing'
       },
-      trialEndsAt: { 
-        type: Date, 
-        default: () => new Date(+new Date() + 90*24*60*60*1000) 
+      trialEndsAt: {
+        type: Date,
+        // 30-day free trial on signup (Tunisia-launch pricing).
+        default: () => new Date(+new Date() + 30*24*60*60*1000)
       },
       lastPaymentDate: { type: Date },
       nextBillingDate: { type: Date }

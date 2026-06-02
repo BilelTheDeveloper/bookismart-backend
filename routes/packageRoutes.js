@@ -1,5 +1,7 @@
 import express from 'express';
 import { protect } from '../middleware/authMiddleware.js';
+import { requireFeature } from '../middleware/planMiddleware.js';
+import { FEATURES } from '../config/plans.js';
 import {
   getOffers, createOffer, updateOffer, deleteOffer,
   getIssued, issueOffer, redeemIssued, cancelIssued, getPackageStats,
@@ -7,16 +9,19 @@ import {
 
 const router = express.Router();
 
-router.get('/stats',  protect, getPackageStats);
+// Packages, memberships & gift cards are a paid feature (Solo Pro / Business+). Trial = full access.
+router.use(protect, requireFeature(FEATURES.PACKAGES));
 
-router.get('/offers',      protect, getOffers);
-router.post('/offers',     protect, createOffer);
-router.put('/offers/:id',  protect, updateOffer);
-router.delete('/offers/:id', protect, deleteOffer);
+router.get('/stats',  getPackageStats);
 
-router.get('/issued',            protect, getIssued);
-router.post('/issue',            protect, issueOffer);
-router.post('/issued/:id/redeem', protect, redeemIssued);
-router.delete('/issued/:id',     protect, cancelIssued);
+router.get('/offers',      getOffers);
+router.post('/offers',     createOffer);
+router.put('/offers/:id',  updateOffer);
+router.delete('/offers/:id', deleteOffer);
+
+router.get('/issued',            getIssued);
+router.post('/issue',            issueOffer);
+router.post('/issued/:id/redeem', redeemIssued);
+router.delete('/issued/:id',     cancelIssued);
 
 export default router;

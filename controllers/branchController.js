@@ -1,5 +1,6 @@
 import Branch from '../models/Branch.js';
 import User from '../models/User.js';
+import { resolveEntitlements } from '../config/plans.js';
 
 /**
  * Branch management — organization accounts only.
@@ -14,12 +15,15 @@ const DEFAULT_HOURS = ['monday','tuesday','wednesday','thursday','friday','satur
 export const getBranches = async (req, res) => {
   try {
     const branches = await Branch.find({ ownerId: req.user._id }).sort({ isMain: -1, createdAt: 1 });
-    const user = await User.findById(req.user._id).select('accountType organization');
+    const user = await User.findById(req.user._id).select('accountType organization paymentInfo');
+    const ent = resolveEntitlements(user || {});
     res.json({
       success: true,
       accountType: user?.accountType || 'individual',
-      seatLimit: user?.organization?.teamSize || null,
-      branchLimit: user?.organization?.branchCount || null,
+      seatLimit: ent.limits.staff === Infinity ? null : ent.limits.staff,
+      branchLimit: ent.limits.branches === Infinity ? null : ent.limits.branches,
+      planId: ent.planId,
+      trial: ent.trial,
       branches,
     });
   } catch (err) {
@@ -31,7 +35,7 @@ export const getBranches = async (req, res) => {
 // POST /api/merchant/branches
 export const createBranch = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('accountType organization');
+    const user = await User.findById(req.user._id).select('accountType organization paymentInfo');
     if (user?.accountType !== 'organization') {
       return res.status(403).json({ success: false, message: 'Branches are available on Organization accounts only.' });
     }
@@ -41,14 +45,15 @@ export const createBranch = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Branch name and city are required.' });
     }
 
+    // Plan-based cap (catalog). During the free trial this is Infinity → no cap.
+    const ent = resolveEntitlements(user);
+    const limit = ent.limits.branches; // Infinity = unlimited
     const existingCount = await Branch.countDocuments({ ownerId: req.user._id });
-    const limit = user?.organization?.branchCount || 0;
-    // Soft cap: allow the planned number of branches (limit). 0/undefined = no enforced cap.
-    if (limit && existingCount >= limit) {
-      return res.status(403).json({
+    if (limit !== Infinity && existingCount >= limit) {
+      return res.status(402).json({
         success: false,
         code: 'BRANCH_LIMIT',
-        message: `Your plan covers ${limit} branch(es). Upgrade to add more.`,
+        message: `Your plan covers ${limit} branch${limit === 1 ? '' : 'es'}. Upgrade to add more.`,
       });
     }
 

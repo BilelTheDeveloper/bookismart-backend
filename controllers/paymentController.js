@@ -6,17 +6,29 @@ import User from '../models/User.js';
 import Payment from '../models/Payment.js';
 import Booking from '../models/Booking.js';
 import { providerStatus, createPaymentLink, verifyPayment } from '../utils/paymentProviders.js';
-
-const PLANS = {
-  basic:   { name: 'Basic',   price: 29  },
-  premium: { name: 'Premium', price: 79  },
-  pro:     { name: 'Pro',     price: 149 },
-};
+import {
+  PLANS, getPlan, plansForAudience, serializePlan,
+  resolveEntitlements, serializeEntitlements, CURRENCY,
+} from '../config/plans.js';
 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
+// GET /api/payments/plans — full catalog (optionally ?audience=individual|organization)
 export const getPlans = (req, res) => {
-  res.json({ success: true, plans: Object.entries(PLANS).map(([key, val]) => ({ key, ...val })) });
+  const { audience } = req.query;
+  const list = audience ? plansForAudience(audience) : Object.values(PLANS);
+  res.json({ success: true, currency: CURRENCY, plans: list.map(serializePlan) });
+};
+
+// GET /api/payments/entitlements — what the current owner's plan unlocks (trial-aware)
+export const getEntitlements = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('accountType organization paymentInfo');
+    res.json({ success: true, entitlements: serializeEntitlements(resolveEntitlements(user || {})) });
+  } catch (err) {
+    console.error('[ENTITLEMENTS]', err.message);
+    res.status(500).json({ success: false, message: 'Could not load your plan.' });
+  }
 };
 
 // GET /api/payments/status — which providers are configured (env) + owner deposit policy
@@ -134,10 +146,21 @@ export const handleWebhook = async (req, res) => {
   }
 };
 
-// Subscription checkout (kept as graceful stub until subscription billing is wired)
+// POST /api/payments/checkout — start a subscription checkout for { plan }
+// (graceful stub until recurring subscription billing is wired to the providers)
 export const createCheckoutSession = async (req, res) => {
+  const plan = getPlan(req.body?.plan);
+  if (!plan) return res.status(400).json({ success: false, message: 'Unknown plan.' });
+  if (plan.custom) {
+    return res.json({ success: true, contactSales: true, message: 'Enterprise plans are tailored to you — our team will reach out.' });
+  }
   if (providerStatus().enabled) {
-    return res.json({ success: true, message: 'Subscription checkout uses the same providers — coming online.', checkoutUrl: null });
+    return res.json({
+      success: true,
+      message: 'Subscription checkout uses the same providers — coming online.',
+      plan: serializePlan(plan),
+      checkoutUrl: null,
+    });
   }
   res.status(503).json({ success: false, message: 'Payment system not configured yet.' });
 };

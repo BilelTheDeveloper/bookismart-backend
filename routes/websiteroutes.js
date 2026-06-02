@@ -8,6 +8,8 @@ import {
   deletePresentationReel,
 } from '../controllers/websiteController.js';
 import { protect } from '../middleware/authMiddleware.js';
+import { requireFeature } from '../middleware/planMiddleware.js';
+import { FEATURES } from '../config/plans.js';
 import upload, { uploadGallery, uploadReel } from '../config/cloudinary.js';
 import { privateCache, TTL } from '../middleware/cache.js';
 
@@ -33,7 +35,9 @@ router.get('/my-site',
 router.post('/save', protect, saveWebsite);
 
 // --- 2b. SAVE SECTION BUILDER (dynamic Shopify-style site) ---
-router.post('/builder', protect, saveBuilder);
+// The Shopify-style builder is a paid feature (Solo Pro / Team+). The fixed
+// category templates above (/save) remain available on every plan. Trial = full access.
+router.post('/builder', protect, requireFeature(FEATURES.WEBSITE_BUILDER), saveBuilder);
 
 // --- 3. SINGLE IMAGE UPLOAD (hero, about, generic asset) ---
 // Field name from FormData can be: 'image' | 'heroImage' | 'aboutImage'
