@@ -152,8 +152,18 @@ export const verifyOTP = async (req, res) => {
     return res.status(503).json({ success: false, message: 'Verification service temporarily unavailable.' });
   }
 
-  if (process.env.NODE_ENV !== 'production' && String(code).trim() === '00000000') {
+  // ⚠️ DEV-ONLY universal OTP. Requires an EXPLICIT opt-in flag AND non-production env,
+  // so a misconfigured NODE_ENV in prod can never re-enable the bypass (server.js also
+  // refuses to boot if ALLOW_TEST_OTP is set while in production).
+  if (
+    process.env.ALLOW_TEST_OTP === 'true' &&
+    process.env.NODE_ENV !== 'production' &&
+    String(code).trim() === '00000000'
+  ) {
     try { await redis.del(`otp:${otpKey}`); await redis.del(attemptKey); } catch { /* no-op */ }
+    if (String(type) === 'email' && target) {
+      try { await redis.setEx(`signup:verified:${String(target).trim().toLowerCase()}`, 1800, '1'); } catch { /* no-op */ }
+    }
     return res.status(200).json({ success: true, message: 'Verification successful.' });
   }
 
@@ -174,6 +184,11 @@ export const verifyOTP = async (req, res) => {
     await redis.del(`otp:${otpKey}`);
     await redis.del(attemptKey);
   } catch { /* no-op */ }
+
+  // Mark this email as verified so register() can enforce it server-side (10.x #5).
+  if (String(type) === 'email' && target) {
+    try { await redis.setEx(`signup:verified:${String(target).trim().toLowerCase()}`, 1800, '1'); } catch { /* no-op */ }
+  }
 
   res.status(200).json({ success: true, message: 'Verification successful.' });
 };
@@ -198,6 +213,20 @@ export const register = async (req, res) => {
 
     const userExists = await User.findOne({ $or: [{ email: email.toLowerCase() }, { phone }] });
     if (userExists) return res.status(409).json({ success: false, message: 'An account with this email or phone already exists.' });
+
+    // 🛡️ Server-side email verification gate (#5): the email must have passed OTP first.
+    // Fails OPEN only when Redis is unavailable, so a Redis outage can't block all signups.
+    const verifyKey = `signup:verified:${email.trim().toLowerCase()}`;
+    try {
+      const emailVerified = await redis.get(verifyKey);
+      if (!emailVerified) {
+        return res.status(403).json({
+          success: false,
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Please verify your email with the OTP code before creating your account.',
+        });
+      }
+    } catch { /* Redis down — do not hard-block account creation */ }
 
     const hashedPassword = await bcrypt.hash(password, 14);
 
@@ -231,6 +260,9 @@ export const register = async (req, res) => {
       expiresAt: refreshTokenExpiresAt,
     });
     await newUser.save();
+
+    // One-time consume the email-verification flag.
+    try { await redis.del(verifyKey); } catch { /* no-op */ }
 
     const cookieOptions = getCookieOptions();
     const csrfToken = generateCsrfToken();
@@ -430,15 +462,29 @@ export const refresh = async (req, res) => {
 
   try {
     const incomingRefreshTokenHash = hashRefreshToken(incomingRefreshToken);
+
+    // 🛡️ UPDATE: Use policy for clearing cookies
+    const cookieOptions = getCookieOptions();
+
+    // 🛡️ REUSE DETECTION (#7): if this token was already rotated out (consumed),
+    // a stolen token is being replayed → revoke the ENTIRE session family.
+    try {
+      const reusedOwnerId = await redis.get(`refresh:used:${incomingRefreshTokenHash}`);
+      if (reusedOwnerId) {
+        await User.findByIdAndUpdate(reusedOwnerId, { $set: { refreshTokens: [] } }).catch(() => {});
+        console.error(JSON.stringify({ level: 'SECURITY', code: 'TOKEN_REUSE', msg: 'Refresh token reuse detected — family revoked', userId: reusedOwnerId, ts: new Date().toISOString() }));
+        res.clearCookie('refreshToken', cookieOptions);
+        res.clearCookie('accessToken', cookieOptions);
+        return res.status(403).json({ success: false, code: 'TOKEN_REUSE', message: 'Session security alert. Please sign in again.' });
+      }
+    } catch { /* Redis down — fall through to normal validation */ }
+
     const user = await User.findOne({
       $or: [
         { "refreshTokens.tokenHash": incomingRefreshTokenHash },
         { "refreshTokens.token": incomingRefreshToken } // legacy fallback
       ]
     });
-    
-    // 🛡️ UPDATE: Use policy for clearing cookies
-    const cookieOptions = getCookieOptions();
 
     if (!user || user.accountStatus === 'suspended') {
         res.clearCookie('refreshToken', cookieOptions);
@@ -482,6 +528,9 @@ export const refresh = async (req, res) => {
       expiresAt: refreshTokenExpiresAt
     });
     await user.save();
+
+    // 🛡️ Mark the just-rotated token as consumed so any later replay is caught (#7).
+    try { await redis.setEx(`refresh:used:${incomingRefreshTokenHash}`, 7 * 24 * 60 * 60, String(user._id)); } catch { /* no-op */ }
 
     // 🛡️ UPDATE: Consistently apply policy during rotation
     const csrfToken = generateCsrfToken();

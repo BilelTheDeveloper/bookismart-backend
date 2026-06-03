@@ -92,6 +92,8 @@ const FIELD_SIZE_LIMITS = {
   presentationReel:  80 * 1024 * 1024,
 };
 
+const VIDEO_FIELDS = ['livenessVideo', 'presentationReel'];
+
 const fileFilter = (req, file, cb) => {
   // 1. MIME allowlist
   if (!ALLOWED_MIMES.includes(file.mimetype)) {
@@ -99,7 +101,6 @@ const fileFilter = (req, file, cb) => {
   }
 
   // 2. Block video files on image-only fields
-  const VIDEO_FIELDS  = ['livenessVideo', 'presentationReel'];
   const isVideoField  = VIDEO_FIELDS.includes(file.fieldname);
   const isVideoMime   = ALLOWED_VIDEO_MIMES.includes(file.mimetype);
   if (isVideoMime && !isVideoField) {
@@ -152,5 +153,48 @@ export const uploadReel = multer({
   },
   fileFilter,
 });
+
+/**
+ * 🛡️ enforceUploadLimits — post-upload, per-field hard size check.
+ *
+ * Multer's single `fileSize` cap can't differ per field, so a small field (e.g.
+ * profilePic 3 MB) would otherwise accept up to the global cap. Run this AFTER the
+ * multer middleware: it rejects (413) and deletes any file that exceeds its field's
+ * limit, so oversized assets never persist.
+ */
+export const enforceUploadLimits = async (req, res, next) => {
+  const files = [];
+  if (req.file) files.push(req.file);
+  if (Array.isArray(req.files)) files.push(...req.files);
+  else if (req.files && typeof req.files === 'object') {
+    for (const k of Object.keys(req.files)) files.push(...req.files[k]);
+  }
+
+  const oversized = files.filter(
+    (f) => typeof f.size === 'number' && f.size > (FIELD_SIZE_LIMITS[f.fieldname] || 5 * 1024 * 1024)
+  );
+
+  if (oversized.length) {
+    // Best-effort cleanup of everything we just uploaded for this request.
+    await Promise.all(
+      files.map((f) =>
+        f.filename
+          ? cloudinary.uploader
+              .destroy(f.filename, { resource_type: VIDEO_FIELDS.includes(f.fieldname) ? 'video' : 'image' })
+              .catch(() => {})
+          : Promise.resolve()
+      )
+    );
+    const f = oversized[0];
+    const limitMb = Math.round((FIELD_SIZE_LIMITS[f.fieldname] || 5 * 1024 * 1024) / (1024 * 1024));
+    return res.status(413).json({
+      success: false,
+      code: 'FILE_TOO_LARGE',
+      message: `File too large for "${f.fieldname}". Maximum allowed is ${limitMb} MB.`,
+    });
+  }
+
+  next();
+};
 
 export default upload;

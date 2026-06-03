@@ -275,6 +275,29 @@ export const isAdmin = (req, res, next) => {
   });
 };
 
+/**
+ * 🛡️ requireActive — gate sensitive business features (finance, payments, packages,
+ * marketing, loyalty, invoices) to fully-onboarded accounts only.
+ *
+ * `protect` intentionally still authenticates on_boarding / review / pending_kyc /
+ * rejected users so they can complete or RESUBMIT their KYC — but those accounts
+ * must not be able to drive money/data features. Trial accounts are accountStatus
+ * 'active', so this never blocks legitimate (incl. trial) usage.
+ */
+export const requireActive = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required', code: 'NOT_AUTHENTICATED' });
+  }
+  if (req.user.accountStatus !== 'active') {
+    return res.status(403).json({
+      success: false,
+      message: 'Your account must be verified and active to use this feature.',
+      code: 'ACCOUNT_NOT_ACTIVE',
+    });
+  }
+  next();
+};
+
 export const requireRole = (...roles) => (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ success: false, message: 'Authentication required', code: 'NOT_AUTHENTICATED' });

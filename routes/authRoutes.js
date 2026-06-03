@@ -17,7 +17,7 @@ import {
 
 // 2. Middlewares
 import { protect, isAdmin } from '../middleware/authMiddleware.js';
-import upload from '../config/cloudinary.js';
+import upload, { enforceUploadLimits } from '../config/cloudinary.js';
 import { setup2FA, enable2FA, disable2FA, verify2FA } from '../controllers/twoFactorController.js';
 
 /**
@@ -51,7 +51,7 @@ router.post('/verify-otp', authLimiter, verifyOTP);
 // 2. Registration — profile picture only (KYC submitted later from dashboard)
 router.post('/register', upload.fields([
     { name: 'profilePic', maxCount: 1 }
-]), register);
+]), enforceUploadLimits, register);
 
 // 3. Secure Login - Added authLimiter to prevent password guessing
 router.post('/login', authLimiter, login);

@@ -15,6 +15,15 @@ for (const key of REQUIRED_ENV) {
   }
 }
 
+// ── Fail-closed safety: the dev-only universal OTP must NEVER be enabled in production ──
+if (process.env.NODE_ENV === 'production' && process.env.ALLOW_TEST_OTP === 'true') {
+  console.error('[FATAL] ALLOW_TEST_OTP must not be enabled in production. Refusing to start.');
+  process.exit(1);
+}
+if (!process.env.NODE_ENV) {
+  console.warn('[WARN] NODE_ENV is not set — assuming production-grade behavior for security gates.');
+}
+
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -32,6 +41,7 @@ import './config/redis.js';
 // Middlewares & Routes
 import { fingerprinter } from './middleware/fingerprint.js';
 import { csrfProtection } from './middleware/csrfProtection.js';
+import { protect, requireActive } from './middleware/authMiddleware.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import websiteRoutes from './routes/websiteroutes.js';
@@ -69,7 +79,7 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import searchRoutes       from './routes/searchRoutes.js';
 import customerNoteRoutes from './routes/customerNoteRoutes.js';
 import chatRoutes         from './routes/chatRoutes.js';
-import paymentRoutes      from './routes/paymentRoutes.js';
+import paymentRoutes, { webhookRouter as paymentWebhookRouter } from './routes/paymentRoutes.js';
 import kycRoutes          from './routes/kycRoutes.js';
 import branchRoutes       from './routes/branchRoutes.js';
 import packageRoutes      from './routes/packageRoutes.js';
@@ -80,6 +90,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { logSecurityEvent } from './utils/securityEventLogger.js';
 import { startReminderScheduler } from './utils/reminderScheduler.js';
+import { verifyWorkModeInvite } from './middleware/workModeToken.js';
 
 /**
  * 1. DATABASE CONNECTION
@@ -175,8 +186,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Stripe webhook — raw body BEFORE express.json()
-app.use('/api/payments', paymentRoutes);
+// Payment provider webhook ONLY — raw body, public, BEFORE express.json().
+// The authenticated payment routes are mounted later (after the full security stack).
+app.use('/api/payments', paymentWebhookRouter);
 
 // No-cache for every API response — prevents sensitive data leaking via CDN/proxy caches
 app.use('/api/', (req, res, next) => {
@@ -258,14 +270,18 @@ app.use('/api/merchant/bookings', ownerBookingRouter); // Owner dashboard manage
 app.use('/api/merchant/consultations', ownerConsultationRouter);
 app.use('/api/merchant/insights', merchantInsightsRoutes);
 app.use('/api/merchant/smart-assistant', aiAssistantRoutes);
-app.use('/api/merchant/finance', financeRoutes);
-app.use('/api/merchant/invoices', invoiceRoutes);
-app.use('/api/merchant/loyalty', loyaltyRoutes);
+// 🛡️ Financial / business-data features require a fully verified ('active') account.
+// (protect runs here to populate req.user for requireActive; routers re-verify internally.)
+app.use('/api/merchant/finance',  protect, requireActive, financeRoutes);
+app.use('/api/merchant/invoices', protect, requireActive, invoiceRoutes);
+app.use('/api/merchant/loyalty',  protect, requireActive, loyaltyRoutes);
 app.use('/api/merchant/settings', settingsRoutes);
 app.use('/api/merchant/branches', branchRoutes);
-app.use('/api/merchant/packages', packageRoutes);
-app.use('/api/merchant/no-show',  noShowRoutes);
-app.use('/api/merchant/marketing', marketingRoutes);
+app.use('/api/merchant/packages', protect, requireActive, packageRoutes);
+app.use('/api/merchant/no-show',  protect, requireActive, noShowRoutes);
+app.use('/api/merchant/marketing', protect, requireActive, marketingRoutes);
+// Authenticated payment routes — now run through cookieParser/CSRF/rate-limit/json (mounted above)
+app.use('/api/payments', protect, requireActive, paymentRoutes);
 app.use('/api/kyc', kycRoutes);
 app.use('/api/work-mode', workModeRoutes);
 
@@ -348,12 +364,19 @@ const io = new SocketIOServer(httpServer, {
 app.set('io', io);
 
 // ── Socket.IO authentication middleware ──
-io.use((socket, next) => {
-  // Work mode sockets bypass JWT auth (capability-token flow)
+io.use(async (socket, next) => {
+  // Work mode sockets use a capability token — VALIDATE IT NOW (fail closed).
   const workModeToken = socket.handshake?.auth?.workModeToken;
   if (typeof workModeToken === 'string' && workModeToken.length > 10) {
-    socket.data.workModeOnly = true;
-    return next();
+    try {
+      const verified = await verifyWorkModeInvite(workModeToken);
+      if (!verified || !verified.ownerId) return next(new Error('AUTH_INVALID'));
+      socket.data.workModeOnly = true;
+      socket.data.workMode = verified;     // bound at handshake, not after connect
+      return next();
+    } catch {
+      return next(new Error('AUTH_INVALID'));
+    }
   }
 
   // All other sockets must provide a valid JWT access token
@@ -380,19 +403,36 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  socket.data.workMode = null;
+  if (socket.data.workMode === undefined) socket.data.workMode = null;
 
-  // Work mode token resolution (after connection, non-blocking)
-  const workModeToken = socket.handshake?.auth?.workModeToken;
-  if (socket.data.workModeOnly && typeof workModeToken === 'string') {
-    import('./middleware/workModeToken.js')
-      .then(({ verifyWorkModeInvite }) => verifyWorkModeInvite(workModeToken))
-      .then((verified) => { if (verified) socket.data.workMode = verified; })
-      .catch(() => {});
-  }
+  /**
+   * Authorize a room join. Generic rooms require an authenticated socket; a
+   * consultation room additionally requires that the consultation belongs to
+   * the socket's owner (prevents eavesdropping on other businesses' sessions).
+   */
+  const canJoinRoom = async (room) => {
+    if (typeof room !== 'string' || room.length === 0 || room.length >= 200) return false;
+    const ownerId = socket.data.workMode?.ownerId || socket.data.userId;
+    if (!ownerId) return false; // must be authenticated (JWT user or verified work-mode)
 
-  socket.on('join', ({ room }) => {
-    if (typeof room === 'string' && room.length < 200) socket.join(room);
+    if (room.startsWith('consultation:')) {
+      const consultationId = room.slice('consultation:'.length);
+      if (!/^[a-f0-9]{24}$/i.test(consultationId)) return false;
+      try {
+        const { default: Consultation } = await import('./models/Consultation.js');
+        const c = await Consultation.findOne({ _id: consultationId, ownerId }).select('_id');
+        return !!c;
+      } catch {
+        return false;
+      }
+    }
+    // A user may only join their own personal room.
+    if (room.startsWith('user:')) return room === `user:${socket.data.userId}`;
+    return true;
+  };
+
+  socket.on('join', async ({ room }) => {
+    if (await canJoinRoom(room)) socket.join(room);
   });
   socket.on('leave', ({ room }) => {
     if (typeof room === 'string' && room.length < 200) socket.leave(room);
